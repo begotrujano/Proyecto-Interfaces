@@ -1,10 +1,13 @@
-"""Tierra 3D que gira sobre su eje (como globo terraqueo), dibujada solo con OpenCV.
+"""Tierra 3D que gira sobre su eje y se inclina (como globo terraqueo), dibujada solo con OpenCV.
 
 Como se hace rapido:
-  - Una "tabla" precalculada dice, para cada punto del disco, que latitud/longitud
-    se ve ahi. Girar la Tierra = sumar un desplazamiento a la longitud.
-  - Cada cuadro: 1 warpAffine de la tabla (escala/posicion) + 1 cv2.transform
-    (aplica el giro) + 1 cv2.remap de la textura. Todo en C, nada en Python puro.
+  - Una "tabla" precalculada guarda, para cada punto del disco, su normal 3D (x, y, z).
+  - Inclinar = rotar esas normales alrededor del eje horizontal y convertirlas a
+    latitud/longitud (2 addWeighted + 2 phase + 1 magnitude). Solo se recalcula
+    cuando cambia la inclinacion; mientras solo gira se reutiliza.
+  - Girar = sumar un desplazamiento a la longitud (eje polar de la Tierra).
+  - Cada cuadro: 1 addWeighted (aplica el giro) + 1 cv2.remap de la textura.
+    Todo en C, nada en Python puro.
   - La iluminacion (dia/noche, brillo del mar, atmosfera) tambien esta precalculada.
   - Piramides (mipmaps) de textura y tablas: sin parpadeo al alejar y el costo es
     proporcional al tamano en pantalla.
@@ -113,15 +116,13 @@ def tablas_esfera(R=600, margen=1.18):
     u, v = (xs - c) / R, (ys - c) / R
     r = np.sqrt(u * u + v * v)
 
-    # --- Coordenadas de textura (fuera del disco se prolonga el borde) ---
+    # --- Normal 3D de cada punto (x derecha, y abajo, z hacia ti). Fuera del disco
+    #     se prolonga el borde. Sin girar ni inclinar: lon 0 / lat 0 al centro. ---
     rc = np.minimum(r, 0.9995)
     k = np.where(r > 1e-9, rc / np.maximum(r, 1e-9), 1.0)
     uc, vc = u * k, v * k
     zc = np.sqrt(np.clip(1.0 - uc * uc - vc * vc, 0.0, 1.0))
-    lon = np.arctan2(uc, zc)                              # este a la derecha
-    lat = np.arcsin(np.clip(-vc, -1.0, 1.0))              # norte arriba
-    tabla = np.dstack([lon / (2 * math.pi) + 0.5,
-                       np.clip(0.5 - lat / math.pi, 0.0005, 0.9995)]).astype(np.float32)
+    tabla = np.dstack([uc, vc, zc]).astype(np.float32)
 
     # --- Iluminacion: sol arriba a la izquierda, un poco de frente ---
     luz = np.array([-0.62, -0.38, 0.69], np.float32)
@@ -175,10 +176,12 @@ class Tierra:
         self.texturas = piramide_textura(bgr)
         self.niveles = piramide_tablas(*tablas_esfera(R))
         self._cache = None
+        self._cache_incl = None
 
-    def dibujar(self, buf, cx, cy, radio, giro):
+    def dibujar(self, buf, cx, cy, radio, giro, inclinacion=0.0):
         """Compone la Tierra sobre buf (BGR uint8) centrada en (cx, cy).
-        giro en radianes: positivo = la superficie de enfrente se mueve a la derecha."""
+        giro en radianes: positivo = la superficie de enfrente se mueve a la derecha.
+        inclinacion en radianes: positivo = la superficie de enfrente sube (se ve el sur)."""
         if radio < 1.0:
             return
         alto, ancho = buf.shape[:2]
@@ -187,10 +190,12 @@ class Tierra:
         clave = (radio, round(cx * 20.0), round(cy * 20.0), ancho, alto)
         if self._cache is None or self._cache[0] != clave:
             self._cache = (clave,) + self._preparar(radio, cx, cy, ancho, alto)
-        _, region, t, mul3, spec, inv3, atm3 = self._cache
+            self._cache_incl = None
+        _, region, normales, mul3, spec, inv3, atm3 = self._cache
         if region is None:
             return
         x0, y0, x1, y1 = region
+
 
         # textura: ~1 texel por pixel en el ecuador
         tex = self.texturas[0]
@@ -200,9 +205,21 @@ class Tierra:
             else:
                 break
         Ht, Wt = tex.shape[:2]
+
+        # lon/lat de cada pixel: solo se recalcula si cambia la inclinacion (~1/4 de pixel)
+        paso = 0.25 / max(radio, 1.0)
+        incl = round(inclinacion / paso) * paso
+        if self._cache_incl is None or self._cache_incl[:2] != (incl, Ht):
+            lon, colat = self._latlon(normales, incl)
+            # colatitud [0, pi] -> fila de la textura, sin tocar la fila del polo opuesto
+            mapa_y = cv2.addWeighted(colat, Ht * 0.999 / math.pi, colat, 0.0, Ht * 0.0005 - 0.5)
+            self._cache_incl = (incl, Ht, lon, mapa_y)
+        _, _, lon, mapa_y = self._cache_incl
+
+        # girar = desplazar la longitud: lon [0, 2pi) -> columna de la textura (lon 0 a la mitad)
         desplaz = -(giro % (2 * math.pi)) / (2 * math.pi) * Wt
-        mapas = cv2.transform(t, np.array([[Wt, 0, desplaz - 0.5], [0, Ht, -0.5]], np.float32))
-        muestra = cv2.remap(tex, mapas, None, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+        mapa_x = cv2.addWeighted(lon, Wt / (2 * math.pi), lon, 0.0, Wt / 2 + desplaz - 0.5)
+        muestra = cv2.remap(tex, mapa_x, mapa_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
 
         color = cv2.multiply(cv2.cvtColor(muestra, cv2.COLOR_BGRA2BGR), mul3, scale=1.0 / ESCALA_MUL)
         reflejo = cv2.multiply(spec, cv2.extractChannel(muestra, 3), scale=1.0 / 255.0)
@@ -210,9 +227,21 @@ class Tierra:
         roi = buf[y0:y1, x0:x1]
         buf[y0:y1, x0:x1] = cv2.add(cv2.multiply(roi, inv3, scale=1.0 / 255.0), color)
 
+    @staticmethod
+    def _latlon(normales, incl):
+        """Inclina las normales (rotacion alrededor del eje x de la pantalla) y las pasa
+        a (longitud [0, 2pi), colatitud [0, pi]) en radianes. Solo OpenCV sobre planos sueltos."""
+        nx, ny, nz = normales
+        c, s = math.cos(incl), math.sin(incl)
+        menos_y = cv2.addWeighted(ny, -c, nz, -s, 0.0)    # -y de la Tierra (norte = arriba)
+        z = cv2.addWeighted(ny, -s, nz, c, 0.0)
+        lon = cv2.phase(z, nx)                            # atan2(x, z): este a la derecha
+        colat = cv2.phase(menos_y, cv2.magnitude(nx, z))  # 0 = polo norte, pi = polo sur
+        return lon, colat
+
     def _preparar(self, radio, cx, cy, ancho, alto):
-        """Lo que solo depende del tamano y la posicion (no del giro): se calcula
-        una vez y se reutiliza mientras la Tierra solo gira."""
+        """Lo que solo depende del tamano y la posicion (no del giro ni de la inclinacion):
+        se calcula una vez y se reutiliza mientras la Tierra solo gira o se inclina."""
         tabla, luz, Rl = self.niveles[0]
         for niv in self.niveles:                          # el mas chico que aun alcanza
             if niv[2] >= radio:
@@ -233,6 +262,6 @@ class Tierra:
         l = cv2.warpAffine(luz, M, (w, h), flags=cv2.INTER_LINEAR,
                            borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
         mul, spec, alfa, brillo_atm = cv2.split(l)
-        return ((x0, y0, x1, y1), t, cv2.cvtColor(mul, cv2.COLOR_GRAY2BGR), spec,
+        return ((x0, y0, x1, y1), tuple(cv2.split(t)), cv2.cvtColor(mul, cv2.COLOR_GRAY2BGR), spec,
                 cv2.cvtColor(255 - alfa, cv2.COLOR_GRAY2BGR),
                 cv2.LUT(cv2.cvtColor(brillo_atm, cv2.COLOR_GRAY2BGR), LUT_ATM))

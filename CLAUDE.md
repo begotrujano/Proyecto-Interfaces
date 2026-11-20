@@ -7,7 +7,7 @@ Proyecto de Interfaces Avanzadas (UV, 5.º semestre). Es un explorador educativo
 - `requirements.txt`: opencv-python (5.1), mediapipe (1.2.3), numpy (2.5), pillow (13).
 - Modelo `gesture_recognizer.task` en la raíz. Se usan sus landmarks 2D/3D y la etiqueta de mano; las poses se calculan con geometría propia.
 - Ejecutar: `.venv\Scripts\python.exe main.py` (opciones: `--camara 1 --dshow --pantalla-completa`)
-- Pruebas sin cámara: `.venv\Scripts\python.exe test_proyecto.py` (19 pruebas; deben pasar siempre. `test_integracion_hilos` exige >40 FPS y puede fallar si la laptop esta en ahorro de energia).
+- Pruebas sin cámara: `.venv\Scripts\python.exe test_proyecto.py` (22 pruebas; deben pasar siempre. `test_integracion_hilos` exige >40 FPS y puede fallar si la laptop esta en ahorro de energia).
 
 ## Archivos
 - `main.py`: ventana, teclas y 3 hilos. **Captura** guarda solo el último cuadro y lo voltea en espejo. **Detección** corre MediaPipe → `SeguidorManos` → `Control.actualizar`. **Dibujo** va a 60 FPS con `Control.avanzar` (inercia) y `Suave`. `DetectorMediaPipe` extrae `hand_landmarker.task` del bundle (zip) y usa solo HandLandmarker (`SOLO_LANDMARKER`), en memoria con `model_asset_buffer`. La captura mide los FPS reales y permite exposicion manual en vivo.
@@ -19,10 +19,11 @@ Proyecto de Interfaces Avanzadas (UV, 5.º semestre). Es un explorador educativo
 - `control.py` (**solo numpy**, con lock):
   - OK sostenido 0.3 s activa o pausa. Pausa automática tras 6 s sin manos.
   - **Izquierda:** puño + subir/bajar = zoom logarítmico (×0.08–×6).
-  - **Derecha:** swipe horizontal con la mano abierta da impulso proporcional y aditivo (en contra frena). Máquina `reposo/trazo/refractario/ignorando/salto`: ignora el regreso de la mano salvo que sea 1.6× más rápido, e ignora los saltos del rastreo. Con puño se agarra y arrastra; al soltar hereda la velocidad.
+  - **Derecha:** swipe con la mano abierta da impulso proporcional y aditivo (en contra frena). Horizontal = gira (`giro`, `omega`); vertical = inclina (`inclinacion`, `omega_v`; tope ±90° en los polos; fricción propia más fuerte, `FRICCION_V_VIDA_MEDIA`). Cada swipe va en un solo eje: el dominante, medido en movimiento físico (`SWIPE_DOMINANCIA`, corrige el aspecto 4:3 de la cámara); los diagonales no cuentan. `_swipe_dir` = ±1 horizontal, ±2 vertical. Máquina `reposo/trazo/refractario/ignorando/salto`: ignora el regreso de la mano salvo que sea 1.6× más rápido, e ignora los saltos del rastreo. Con puño se agarra y arrastra en 2D; al soltar hereda las dos velocidades.
   - Expone `instantanea()` → `Estado`/`ManoVista`.
-- `tierra.py`: esfera 3D en CPU. Tabla precalculada de lat/lon; girar = desplazar la longitud.
-  - Por cuadro: `warpAffine` → `cv2.transform` → `cv2.remap` (BORDER_WRAP).
+- `tierra.py`: esfera 3D en CPU. Tabla precalculada de normales 3D (planos x, y, z sueltos: `split` es caro).
+  - Inclinar = rotar las normales (2 `addWeighted`) y pasarlas a lon/colatitud (`cv2.phase`, `cv2.magnitude`); se cachea mientras la inclinación no cambie. Girar = desplazar la longitud.
+  - Por cuadro: `addWeighted` (giro) → `cv2.remap` (BORDER_WRAP, mapas x/y separados). Con zoom ×6: ~16 ms girando y ~26 ms mientras se inclina (dividir en hilos no ayuda).
   - Iluminación precalculada (día/noche, reflejo en el mar, atmósfera vía LUT), mipmaps, y caché de lo que no cambia al girar.
   - Textura `assets/tierra_nasa_bluemarble.jpg` (4096×2048, NASA, dominio público). Arranca con longitud −99° (México).
 - `render.py`: estrellas, Tierra, cursores (naranja = zoom, azul = giro), barra de zoom, estado, avisos, info de depuración (tecla H) y miniatura de cámara. Textos con Pillow en caché, para que salgan los acentos.
@@ -32,11 +33,10 @@ Proyecto de Interfaces Avanzadas (UV, 5.º semestre). Es un explorador educativo
 Espacio activar/pausar · R reiniciar · I intercambiar manos · [ ] exposición (E = automática) · V cámara · H info · F pantalla completa · Q/Esc salir.
 
 ## Estado y pendientes
-- Pruebas simuladas: 19/19. **Falta validar con la cámara real** y calibrar OK_ON, CAM_EXPOSICION, PUNO_ON, SWIPE_V_ON y GANANCIA_ZOOM. También falta confirmar que la mano izquierda/derecha sale correcta (si no, tecla I o `INVERTIR_MANOS`).
+- Pruebas simuladas: 22/22 (salvo `test_integracion_hilos` en ahorro de energía). **Falta validar con la cámara real** y calibrar OK_ON, CAM_EXPOSICION, PUNO_ON, SWIPE_V_ON, GANANCIA_ZOOM y la inclinación (OMEGA_V_MAX, FRICCION_V_VIDA_MEDIA). También falta confirmar que la mano izquierda/derecha sale correcta (si no, tecla I o `INVERTIR_MANOS`).
 - Por decidir:
   - si el OK también pausa;
   - la pausa automática;
-  - inclinar con un swipe vertical;
   - un gesto para volver a la Tierra;
   - un gesto de traslado.
 - Siguiente: Luna, luego el Sistema Solar con escala logarítmica, luego la misión del cometa. Antes de crecer, evaluar si se migra el render a GPU (Three.js o Unity), reutilizando `manos.py` y `control.py`.

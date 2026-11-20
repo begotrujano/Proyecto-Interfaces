@@ -161,16 +161,19 @@ class Escena:
         self._rastros = {}
 
     # ------------------------------------------------------------------
-    def componer(self, log_escala, giro, estado, info, frame=None, ver_camara=True, ver_info=True, t=0.0):
+    def componer(self, log_escala, giro, estado, info, frame=None, ver_camara=True, ver_info=True, t=0.0,
+                 inclinacion=None):
+        if inclinacion is None:
+            inclinacion = estado.inclinacion
         np.copyto(self.buf, self.estrellas)
         self.tierra.dibujar(self.buf, self.w / 2.0, self.h / 2.0,
-                            self.radio_base * math.exp(log_escala), giro)
+                            self.radio_base * math.exp(log_escala), giro, inclinacion)
         if estado.activo:
             self._barra_zoom(log_escala, estado.zoom_agarrado)
         self._manos(estado)
         if ver_camara and frame is not None:
             self._camara(frame, estado)
-        self._hud(log_escala, giro, estado, info, ver_info)
+        self._hud(log_escala, giro, inclinacion, estado, info, ver_info)
         self._avisos(estado, t)
         return self.buf
 
@@ -186,7 +189,7 @@ class Escena:
             x, y = v.x, v.y
 
             ras = self._rastros.setdefault(v.id, deque(maxlen=10))
-            if v.accion == "swipe":
+            if v.accion in ("swipe", "swipe_v"):
                 ras.append((x, y))
             elif ras:
                 ras.popleft()
@@ -199,10 +202,11 @@ class Escena:
             if v.accion in ("zoom", "agarre"):
                 cv2.circle(b, _p(x, y), 10 * 16, col, -1, cv2.LINE_AA, 4)
                 cv2.circle(b, _p(x, y), 22 * 16, col, 2, cv2.LINE_AA, 4)
-                angs = (-math.pi / 2, math.pi / 2) if v.accion == "zoom" else (math.pi, 0.0)
+                angs = ((-math.pi / 2, math.pi / 2) if v.accion == "zoom"
+                        else (math.pi, 0.0, -math.pi / 2, math.pi / 2))    # agarre: en 4 direcciones
                 for a in angs:
                     _flecha(b, x + 34 * math.cos(a), y + 34 * math.sin(a), a, col)
-            elif v.accion == "swipe":
+            elif v.accion in ("swipe", "swipe_v"):
                 cv2.circle(b, _p(x, y), 18 * 16, col, 3, cv2.LINE_AA, 4)
                 cv2.circle(b, _p(x, y), 4 * 16, col, -1, cv2.LINE_AA, 4)
             else:
@@ -254,7 +258,7 @@ class Escena:
         self.buf[y0:y0 + alto, x0:x0 + ancho] = pip
         cv2.rectangle(self.buf, (x0, y0), (x0 + ancho, y0 + alto), (90, 90, 90), 1, cv2.LINE_AA)
 
-    def _hud(self, log_escala, giro, estado, info, ver_info):
+    def _hud(self, log_escala, giro, inclinacion, estado, info, ver_info):
         b, T = self.buf, self.texto
         if estado.activo:
             cv2.circle(b, _p(26, 31), 6 * 16, COL_OK, -1, cv2.LINE_AA, 4)
@@ -265,14 +269,16 @@ class Escena:
         lon = -math.degrees(giro)
         lon = (lon + 180.0) % 360.0 - 180.0
         lado = "O" if lon < 0 else "E"
-        T.dibujar(b, f"Escala ×{math.exp(log_escala):.2f}   ·   Centro {abs(lon):.0f}° {lado}",
+        lat = -math.degrees(inclinacion)                   # inclinar hacia arriba = se ve el sur
+        hemi = "S" if lat < -0.5 else "N"
+        T.dibujar(b, f"Escala ×{math.exp(log_escala):.2f}   ·   Centro {abs(lat):.0f}° {hemi}, {abs(lon):.0f}° {lado}",
                   20, 48, 16, COL_TEXTO)
 
         if ver_info:
             exp = info.get("exposicion")
             T.dibujar(b, f"dibujo {info['fps_render']:.0f} fps  ·  cámara {info.get('fps_cam', 0):.0f} fps "
                          f"(exp. {'auto' if exp is None else f'{exp:+.0f}'})  ·  detección {info['fps_det']:.0f} fps "
-                         f"({info['lat_ms']:.0f} ms)  ·  giro {estado.omega:+.2f} rad/s  ·  swipe: {estado.swipe}",
+                         f"({info['lat_ms']:.0f} ms)  ·  giro {estado.omega:+.2f}  incl. {estado.omega_v:+.2f} rad/s  ·  swipe: {estado.swipe}",
                       20, 74, 13, COL_TENUE)
             y = 94
             for v in sorted(estado.manos, key=lambda v: v.rol):
@@ -288,7 +294,8 @@ class Escena:
                          "[ ] exposición · H info · F pantalla completa · Q salir", self.w - 16, 22, 13, COL_TENUE, ancla="d")
 
         if estado.activo:
-            msg = "Izquierda: cierra el puño y sube o baja = zoom     ·     Derecha: swipe = girar, puño = agarrar     ·     OK = pausa"
+            msg = ("Izquierda: puño y sube o baja = zoom     ·     Derecha: swipe a los lados = girar, "
+                   "arriba/abajo = inclinar; puño = agarrar     ·     OK = pausa")
         else:
             msg = "Haz el signo de OK con cualquier mano para activar el control"
         T.dibujar(b, msg, self.w / 2, self.h - 40, 17 if not estado.activo else 15, COL_TEXTO, ancla="c")

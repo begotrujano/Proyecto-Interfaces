@@ -2,7 +2,8 @@
 
     1. Haz el signo de OK (una vez, con cualquier mano) para activar el control.
     2. Mano IZQUIERDA: cierra el puno y sube o baja -> zoom.
-    3. Mano DERECHA: swipe horizontal -> la Tierra gira con inercia; puno -> la agarras.
+    3. Mano DERECHA: swipe horizontal -> gira; swipe vertical -> se inclina (norte/sur);
+       puno -> la agarras y la arrastras en cualquier direccion.
     4. OK otra vez (o la barra espaciadora) -> pausa.
 
 Arquitectura (3 hilos, para que nada se trabe):
@@ -246,14 +247,16 @@ class Suave:
         self.tau = tau
         self.log_escala = None
         self.giro = None
+        self.inclinacion = None
 
-    def paso(self, log_escala, giro, dt):
+    def paso(self, log_escala, giro, inclinacion, dt):
         if self.log_escala is None or abs(giro - self.giro) > math.pi:
-            self.log_escala, self.giro = log_escala, giro
+            self.log_escala, self.giro, self.inclinacion = log_escala, giro, inclinacion
             return
         a = 1.0 - math.exp(-dt / max(self.tau, 1e-4))
         self.log_escala += (log_escala - self.log_escala) * a
         self.giro += (giro - self.giro) * a
+        self.inclinacion += (inclinacion - self.inclinacion) * a
 
 
 # ----------------------------------------------------------------------
@@ -290,12 +293,13 @@ class Aplicacion:
 
         self.control.avanzar(t)
         est = self.control.instantanea(t)
-        self.suave.paso(est.log_escala, est.giro, dt)
+        self.suave.paso(est.log_escala, est.giro, est.inclinacion, dt)
         info = {"fps_render": self.fps_render, "fps_det": self.deteccion.fps, "lat_ms": self.deteccion.lat_ms,
                 "fps_cam": getattr(self.captura, "fps", 0.0),
                 "exposicion": getattr(self.captura, "exposicion", None)}
         return self.escena.componer(self.suave.log_escala, self.suave.giro, est, info,
-                                    self.captura.frame, self.ver_camara, self.ver_info, t)
+                                    self.captura.frame, self.ver_camara, self.ver_info, t,
+                                    self.suave.inclinacion)
 
     def tecla(self, k):
         if k == ord(" "):

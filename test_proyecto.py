@@ -268,6 +268,66 @@ def test_salto_de_rastreo_no_gira():
     assert s.ctl.omega > 2.0
 
 
+def swipe_v(y0, y1, dur, x=X_DER):
+    return lambda t: [DER("abierta", x=x, y=lerp(y0, y1, t / dur))]
+
+
+def test_swipe_vertical_inclina():
+    s = Sim(activo=True)
+    s.correr(lambda t: [DER("abierta", y=0.75)], 0.5)
+    s.correr(swipe_v(0.75, 0.30, 0.18), 0.22)                 # swipe hacia ARRIBA
+    wv = s.ctl.omega_v
+    print(f"  swipe arriba: omega_v {wv:.2f} rad/s, omega {s.ctl.omega:.2f}")
+    assert wv > 1.0, "un swipe vertical debe inclinar"
+    assert abs(s.ctl.omega) < 0.05, "un swipe vertical no debe girar"
+    s.correr(swipe_v(0.30, 0.75, 0.30), 0.35)                 # regreso de la mano: se ignora
+    print(f"  tras el regreso de la mano: omega_v {s.ctl.omega_v:.2f}")
+    assert s.ctl.omega_v > 0.4 * wv, "el regreso de la mano no debe frenarla ni invertirla"
+    s.correr(lambda t: [DER("abierta", y=0.75)], 1.5)
+    print(f"  inclinacion final: {math.degrees(s.ctl.inclinacion):.0f} grados")
+    assert s.ctl.inclinacion > 0.3, "subir la mano = la superficie sube (se ve el sur)"
+
+    s = Sim(activo=True)
+    s.correr(lambda t: [DER("abierta", y=0.30)], 0.5)
+    s.correr(swipe_v(0.30, 0.75, 0.25), 0.3)                  # swipe hacia ABAJO
+    s.correr(lambda t: [DER("abierta", y=0.75)], 1.0)
+    print(f"  swipe abajo: inclinacion {math.degrees(s.ctl.inclinacion):.0f} grados")
+    assert s.ctl.inclinacion < -0.3, "bajar la mano = se ve el norte"
+
+
+def test_swipe_horizontal_no_inclina():
+    s = Sim(activo=True)
+    s.correr(lambda t: [DER("abierta", x=0.35)], 0.5)
+    s.correr(lambda t: [DER("abierta", x=lerp(0.35, 0.75, t / 0.25), y=lerp(Y0, 0.50, t / 0.25))], 0.3)
+    assert s.ctl.omega > 1.0 and abs(s.ctl.omega_v) < 0.05
+    # diagonal a 45 grados (fisicos: la camara es 4:3): no es de ningun eje, no hace nada
+    dy = 0.30 * CAM_W / CAM_H
+    s = Sim(activo=True)
+    s.correr(lambda t: [DER("abierta", x=0.40, y=0.30)], 0.5)
+    s.correr(lambda t: [DER("abierta", x=lerp(0.40, 0.70, t / 0.2), y=lerp(0.30, 0.30 + dy, t / 0.2))], 0.25)
+    print(f"  diagonal: omega {s.ctl.omega:.2f}  omega_v {s.ctl.omega_v:.2f}")
+    assert abs(s.ctl.omega) < 0.05 and abs(s.ctl.omega_v) < 0.05
+
+
+def test_agarre_inclina_y_tope_en_polos():
+    s = Sim(activo=True)
+    s.correr(lambda t: [DER("abierta", y=0.6)], 0.4)
+    s.correr(lambda t: [DER("puno", y=0.6)], 0.3)
+    s.correr(lambda t: [DER("puno", y=lerp(0.6, 0.45, t / 0.5))], 0.6)    # sube 0.15 = 18.75 % de alto
+    R = min(max(C.RADIO_BASE_REL * C.ALTO, C.RADIO_GIRO_MIN), C.RADIO_GIRO_MAX)
+    esperado = 0.15 / 0.8 * C.ALTO / R
+    print(f"  arrastrar hacia arriba: {s.ctl.inclinacion:.2f} rad (esperado ~{esperado:.2f})")
+    assert abs(s.ctl.inclinacion - esperado) < 0.12
+    # lanzarla hacia arriba con fuerza: llega al polo y se detiene ahi
+    s.correr(lambda t: [DER("puno", y=lerp(0.45, 0.85, t / 0.4))], 0.5)
+    s.correr(lambda t: [DER("puno", y=lerp(0.85, 0.2, t / 0.2))], 0.15)
+    s.correr(lambda t: [DER("abierta", y=0.2)], 0.2)
+    s.correr(lambda t: [], 2.0)
+    lim = math.radians(C.INCLINACION_MAX)
+    print(f"  tras lanzarla: inclinacion {math.degrees(s.ctl.inclinacion):.0f} grados, omega_v {s.ctl.omega_v:.2f}")
+    assert abs(s.ctl.inclinacion - lim) < 1e-6 and s.ctl.omega_v == 0.0
+
+
 def test_atrapar_detiene():
     s = Sim(activo=True)
     s.ctl.omega = 4.0
@@ -310,6 +370,9 @@ def test_render():
         "activo": Estado(True, math.log(1.6), math.radians(80), 2.0,
                          (mv(0, "izq", 300, 300, "zoom", puno=True), mv(1, "der", 980, 420, "swipe")),
                          (("Control activado", 0.0),), True, False, "trazo", False),
+        "inclinada": Estado(True, math.log(1.3), math.radians(99), 0.0,
+                            (mv(1, "der", 980, 300, "swipe_v"),), (), False, False, "trazo", False,
+                            math.radians(-50), -1.5),
     }
     tiempos = []
     for nombre, est in casos.items():

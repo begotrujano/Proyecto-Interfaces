@@ -8,6 +8,8 @@ Guia rapida para afinar (mira los numeros de depuracion en pantalla, tecla H):
   - Suelta el puno sin querer:       sube PUNO_OFF
   - El swipe no gira:                baja SWIPE_V_ON
   - Gira solo al mover la mano:      sube SWIPE_V_ON
+  - Un swipe horizontal inclina (o al reves): sube SWIPE_DOMINANCIA
+  - Un swipe vertical inclina mucho/poco: FRICCION_V_VIDA_MEDIA (y OMEGA_V_MAX)
   - El zoom va muy rapido/lento:     GANANCIA_ZOOM
   - Tiembla / se siente con retraso: OE_MINCUT / OE_BETA y SUAVIZADO_TAU
 """
@@ -95,16 +97,22 @@ GANANCIA_ZOOM = 2.5            # subir media pantalla = x3.5
 ESCALA_MIN, ESCALA_MAX = 0.08, 6.0
 
 # Giro (mano derecha)
-#   puno = agarrar la Tierra (la superficie sigue a tu mano); al soltar conserva el impulso
+#   puno = agarrar la Tierra (la superficie sigue a tu mano, en 2D); al soltar conserva el impulso
 #   swipe con la mano abierta = darle vuelo (cada swipe suma; en contra, frena)
+#     horizontal = girar sobre su eje;  vertical = inclinar (ver el norte o el sur)
 RADIO_GIRO_MIN, RADIO_GIRO_MAX = 150.0, 450.0   # px; radio usado para convertir mano -> angulo
-SWIPE_V_ON = 1.5               # anchos de pantalla por segundo para que cuente como swipe
+SWIPE_V_ON = 1.5               # anchos (o altos) de pantalla por segundo para que cuente como swipe
 SWIPE_V_OFF = 0.6
 SWIPE_V_FUERTE = 3.5           # a esta velocidad (o mas) el swipe da el impulso maximo
 SWIPE_V_SALTO = 9.0            # mas rapido que esto (sin filtrar) = salto del rastreo, se ignora
-SWIPE_HORIZONTAL = 1.3         # |vx| debe ser al menos esto * |vy|
+SWIPE_DOMINANCIA = 1.3         # el eje del swipe debe ser al menos esto * el otro (movimiento fisico)
 SWIPE_REFRACTARIO = 0.45       # s tras un swipe en que se ignora el regreso de la mano...
 SWIPE_REVERSA = 1.6            # ...salvo que sea 1.6 veces mas rapido que el swipe anterior
 OMEGA_MAX = 4.5                # rad/s (~0.7 vueltas por segundo)
+OMEGA_V_MAX = 2.5              # rad/s de inclinacion (de ecuador a polo en ~0.6 s)
+INCLINACION_MAX = 90.0         # grados; 90 = puedes ver el polo de frente
+# La inclinacion frena mas rapido que el giro: recorre ~velocidad * 1.44 * vida media.
+# Con 0.5 s un swipe suave inclina ~30 grados y uno fuerte llega al polo.
+FRICCION_V_VIDA_MEDIA = 0.5
 FRICCION_VIDA_MEDIA = 1.6      # s en que la velocidad de giro cae a la mitad
 ROTACION_REPOSO = 0.07         # rad/s de giro suave cuando el control esta en pausa
