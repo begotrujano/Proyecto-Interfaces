@@ -355,6 +355,140 @@ def test_pausa_automatica():
     assert not s.ctl.activo
 
 
+# ----------------------------------------------------------------------
+# Espacio: efemerides, camara en orbita, dia/noche, Sol y Luna
+# ----------------------------------------------------------------------
+def _fecha(*a):
+    from datetime import datetime, timezone
+    return datetime(*a, tzinfo=timezone.utc)
+
+
+def test_efemerides():
+    from universo import astros as A
+    # eclipse total del 8 de abril de 2024, maximo sobre Durango (25.29 N, 104.14 O)
+    jd = A.dia_juliano(_fecha(2024, 4, 8, 18, 17, 20))
+    sol, _ = A.sol(jd)
+    luna = A.luna(jd)
+    obs = A.punto_superficie(25.29, -104.14)
+    hacia_luna = (luna - obs) / np.linalg.norm(luna - obs)
+    sep = math.degrees(math.acos(float(np.clip(hacia_luna @ sol, -1, 1))))
+    print(f"  eclipse 2024: Sol y Luna separados {sep:.2f} grados vistos desde Durango")
+    assert sep < 0.35
+    peri = A.sol(A.dia_juliano(_fecha(2025, 1, 4, 13, 28)))[1] / 1e6
+    afel = A.sol(A.dia_juliano(_fecha(2025, 7, 3, 19, 55)))[1] / 1e6
+    print(f"  Sol: perihelio {peri:.2f}, afelio {afel:.2f} millones de km")
+    assert abs(peri - 147.10) < 0.05 and abs(afel - 152.09) < 0.05
+    s = A.sol(A.dia_juliano(_fecha(2024, 6, 20, 20, 51)))[0]
+    assert abs(math.degrees(math.asin(s[2])) - 23.44) < 0.05        # solsticio: Sol sobre el tropico
+    dist = [np.linalg.norm(A.luna(A.dia_juliano(_fecha(2026, 11, d, 0)))) * A.RADIO_TIERRA_KM
+            for d in range(1, 31)]
+    print(f"  Luna en noviembre 2026: {min(dist):,.0f} a {max(dist):,.0f} km")
+    assert 355_000 < min(dist) < 370_000 and 400_000 < max(dist) < 407_500
+
+
+def test_camara_orbita():
+    from universo import astros as A
+    f = 1000.0
+    giro, incl = math.radians(99), math.radians(-20)
+    d = A.distancia_para_radio(173.0, f)
+    cam = A.Camara(giro, incl, d, f, 640, 360)
+    x, y, z = cam.proyectar_punto(np.zeros(3))
+    assert abs(x - 640) < 1e-6 and abs(y - 360) < 1e-6 and abs(z - d) < 1e-9
+    assert abs(A.radio_aparente_px(1.0, d, f) - 173.0) < 1e-6
+    # la camara esta sobre lon = -giro, lat = -inclinacion (lo mismo que dibuja la Tierra y el HUD)
+    centro = cam.a_camara(A.punto_superficie(20.0, -99.0))
+    assert np.allclose(centro, [0, 0, 1], atol=1e-9)
+    norte = cam.a_camara(A.punto_superficie(30.0, -99.0))
+    este = cam.a_camara(A.punto_superficie(20.0, -89.0))
+    assert norte[1] < 0 and este[0] > 0                             # norte arriba, este a la derecha
+
+
+def test_estrellas_siguen_a_la_camara():
+    """Al orbitar, la camara gira para seguir viendo la Tierra: el fondo se desliza al lado
+    CONTRARIO de la superficie de enfrente (como al caminar alrededor de un arbol mirandolo)."""
+    from universo import astros as A
+    f = 1000.0
+    d = A.distancia_para_radio(173.0, f)
+    a = A.Camara(1.0, 0.0, d, f, 640, 360)
+    b = A.Camara(1.05, 0.0, d, f, 640, 360)
+    estrella = -a.M[2] + 0.1 * a.M[0]                             # algo detras de la Tierra
+    estrella /= np.linalg.norm(estrella)
+    xa, _, _ = a.proyectar_direccion(estrella)
+    xb, _, _ = b.proyectar_direccion(estrella)
+    p = A.punto_superficie(0.0, -math.degrees(1.0))               # el punto de la Tierra al centro
+    sa, _, _ = a.proyectar_punto(p)
+    sb, _, _ = b.proyectar_punto(p)
+    print(f"  giro +0.05 rad: estrella {xb - xa:+.1f} px, superficie {sb - sa:+.1f} px")
+    assert sb - sa > 5 and xb - xa < -5
+    assert abs((xb - xa) + f * 0.05) < 2                           # las estrellas: rotacion pura de la vista
+
+
+def test_dia_noche_y_luces():
+    from universo import astros as A
+    from universo.render import Escena
+    esc = Escena()
+    est = Control().instantanea(0.0)
+    fecha = _fecha(2026, 11, 20, 19, 0)                            # 00:30 en la India, 13:00 en Mexico
+    sol = A.sol(A.dia_juliano(fecha))[0]
+    lat_s, lon_s = math.asin(sol[2]), math.atan2(sol[1], sol[0])
+
+    def centro(giro, incl):
+        img = esc.componer(0.0, giro, est, {}, None, False, False, 0.0, incl, fecha)
+        return img[350:370, 630:650].astype(float).mean(), img
+
+    dia, _ = centro(-lon_s, -lat_s)                                # camara sobre el punto subsolar
+    noche, _ = centro(-lon_s + math.pi, lat_s)                     # sobre el antisolar
+    print(f"  brillo al centro: dia {dia:.0f}, noche {noche:.0f}")
+    assert dia > 70 and noche < 0.4 * dia
+    assert esc.astros["sol_px"] is None, "con la Tierra enfrente, el Sol queda tapado"
+
+    _, img = centro(math.radians(-78), math.radians(-22))          # India de noche
+    disco = img[360 - 160:360 + 160, 640 - 160:640 + 160].astype(int)
+    luces = int(((disco[..., 2] > 150) & (disco[..., 1] > 110) & (disco[..., 0] < disco[..., 2])).sum())
+    print(f"  pixeles de luces de ciudades sobre la India de noche: {luces}")
+    assert luces > 40
+
+
+def test_seleccion_de_astro():
+    from universo.viaje import Selector
+    sel = Selector()
+    obj = {"tierra": (640, 360, 170), "luna": (1000, 300, 4)}
+    t, elegido, vista = 0.0, None, None
+    while t < C.SELECCION_SOSTENER - 0.1:                         # palma sobre la Luna (pequena: margen)
+        vista, elegido = sel.actualizar([(1, 1020, 310)], obj, "tierra", t)
+        t += 1 / 60
+    assert elegido is None and 0.8 < vista[2] < 1.0
+    sel.actualizar([], obj, "tierra", t)                           # un parpadeo del rastreo no reinicia
+    for _ in range(12):
+        t += 1 / 60
+        vista, e = sel.actualizar([(1, 1020, 310)], obj, "tierra", t)
+        elegido = elegido or e
+    assert elegido == "luna"
+    sel = Selector()                                               # el astro donde ya estas no se elige
+    for k in range(120):
+        _, e = sel.actualizar([(1, 640, 360)], obj, "tierra", k / 60)
+        assert e is None
+
+
+def test_viaje_continuo():
+    from universo.viaje import Viaje
+    pos0, tierra, luna = np.array([5.8, 0, 0]), np.zeros(3), np.array([-40.0, 45.0, 3.0])
+    v = Viaje("luna", 10.0, pos0, tierra, luna, 0.2727, 1.6)
+    prev, hipers = None, []
+    for k in range(int(C.VIAJE_DURACION * 60) + 1):
+        p, objetivo, h = v.camara(10.0 + k / 60)
+        hipers.append(h)
+        if prev is not None:
+            assert np.linalg.norm(p - prev) < 3.0, "sin saltos (no es teletransporte)"
+        prev = p
+    assert np.allclose(v.camara(10.0)[0], pos0)
+    assert abs(np.linalg.norm(prev - luna) - 1.6) < 1e-6 and v.terminado(10.0 + C.VIAJE_DURACION)
+    assert hipers[0] < 0.01 and hipers[-1] < 0.05 and max(hipers) > 0.95
+    s = Sim()
+    s.ctl.colocar(1.0, -0.4)
+    assert s.ctl.giro == 1.0 and s.ctl.inclinacion == -0.4 and s.ctl.omega == 0.0
+
+
 def test_render():
     import cv2
     from universo.control import Estado, ManoVista
@@ -384,7 +518,7 @@ def test_render():
             tiempos.append(time.perf_counter() - a)
         cv2.imwrite(str(SALIDA / f"render_{nombre}.png"), f)
     med = np.median(tiempos) * 1000
-    print(f"  cuadro completo (Tierra + HUD + camara): {med:.1f} ms")
+    print(f"  cuadro completo (cielo + Sol + Luna + Tierra + HUD + camara): {med:.1f} ms")
     assert med < 25
 
 

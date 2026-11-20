@@ -1,5 +1,6 @@
-"""Todo lo que se dibuja encima: estrellas, Tierra, guias de las manos, barra de zoom,
-textos (con acentos, via Pillow) y la camara en miniatura."""
+"""Todo lo que se dibuja: el cielo real (estrellas, Via Lactea, Sol, Luna), la Tierra
+vista desde la camara en orbita, guias de las manos, barra de zoom, textos (con
+acentos, via Pillow) y la camara en miniatura."""
 
 import math
 from collections import OrderedDict, deque
@@ -7,7 +8,11 @@ from collections import OrderedDict, deque
 import cv2
 import numpy as np
 
+from datetime import datetime, timezone
+
+from universo import astros as A
 from universo import config as C
+from universo.cielo import Cielo
 from universo.tierra import Tierra
 
 COL_IZQ = (40, 178, 255)        # BGR ambar   -> zoom
@@ -21,44 +26,6 @@ CONEXIONES = [
     (5, 9), (9, 10), (10, 11), (11, 12), (9, 13), (13, 14), (14, 15), (15, 16),
     (13, 17), (17, 18), (18, 19), (19, 20), (0, 17),
 ]
-
-
-# ----------------------------------------------------------------------
-# Estrellas (se generan una vez)
-# ----------------------------------------------------------------------
-def generar_estrellas(w, h, semilla=11):
-    rng = np.random.default_rng(semilla)
-    n = int(w * h / 1400)
-    img = np.zeros((h, w, 3), np.float32)
-    xs, ys = rng.uniform(0, w, n), rng.uniform(0, h, n)
-    brillo = 0.10 + 0.90 * rng.random(n) ** 5
-    tipo = rng.random(n)
-    colores = np.where(tipo[:, None] < 0.25, np.array([0.62, 0.82, 1.0]),
-                       np.where(tipo[:, None] < 0.75, np.array([1.0, 1.0, 1.0]),
-                                np.array([1.0, 0.88, 0.76])))
-
-    def mancha(cx, cy, sigma, amp, color):
-        rad = int(math.ceil(3 * sigma)) + 1
-        x0, y0 = int(cx) - rad, int(cy) - rad
-        gx = np.arange(x0, x0 + 2 * rad + 1)
-        gy = np.arange(y0, y0 + 2 * rad + 1)
-        g = np.exp(-((gx[None, :] + 0.5 - cx) ** 2 + (gy[:, None] + 0.5 - cy) ** 2) / (2 * sigma ** 2)) * amp
-        xa, xb = max(x0, 0), min(x0 + 2 * rad + 1, w)
-        ya, yb = max(y0, 0), min(y0 + 2 * rad + 1, h)
-        if xb > xa and yb > ya:
-            img[ya:yb, xa:xb] += g[ya - y0:yb - y0, xa - x0:xb - x0, None] * color
-
-    for i in range(n):
-        mancha(xs[i], ys[i], 0.55 + 0.9 * brillo[i], brillo[i], colores[i])
-        if brillo[i] > 0.55:
-            mancha(xs[i], ys[i], 3.2, 0.10 * brillo[i], colores[i])
-    # un velo muy tenue de "via lactea" para que el fondo no sea plano
-    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-    banda = np.exp(-((yy - (0.35 * h + 0.25 * xx)) / (0.22 * h)) ** 2)
-    ruido = cv2.GaussianBlur(rng.random((h // 8, w // 8)).astype(np.float32), (0, 0), 2.0)
-    ruido = cv2.resize(ruido, (w, h), interpolation=cv2.INTER_CUBIC)
-    img += (banda * (0.5 + ruido) * 0.035)[..., None] * np.array([1.0, 0.85, 0.80])
-    return (np.clip(img, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
 
 
 # ----------------------------------------------------------------------
@@ -150,24 +117,44 @@ def _flecha(buf, cx, cy, ang, col, tam=7):
 
 
 # ----------------------------------------------------------------------
+def fecha_actual():
+    """La fecha del cielo: config.FECHA si esta fijada, si no, ahora mismo (UTC)."""
+    if C.FECHA:
+        f = datetime.fromisoformat(C.FECHA)
+        return f if f.tzinfo else f.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc)
+
+
+NOMBRES = {"tierra": "Tierra", "luna": "Luna"}
+
+
+def _km(km):
+    if km >= 1e6:
+        return f"{km / 1e6:,.1f} millones de km".replace(",", " ")
+    return f"{km:,.0f} km".replace(",", " ")
+
+
 class Escena:
     def __init__(self, ancho=C.ANCHO, alto=C.ALTO, textura=C.TEXTURA):
         self.w, self.h = ancho, alto
-        self.estrellas = generar_estrellas(ancho, alto)
-        self.tierra = Tierra(textura)
+        self.focal = (alto / 2.0) / math.tan(math.radians(C.CAMPO_VISION_V) / 2.0)
+        self.cielo = Cielo(ancho, alto, self.focal)
+        self.tierra = Tierra(textura, ruta_noche=C.TEXTURA_NOCHE)
+        self.luna = Tierra(C.TEXTURA_LUNA, R=300, atmosfera=False)
         self.texto = Texto()
-        self.buf = np.empty_like(self.estrellas)
+        self.buf = np.zeros((alto, ancho, 3), np.uint8)
         self.radio_base = C.RADIO_BASE_REL * alto
         self._rastros = {}
+        self.astros = {}
 
     # ------------------------------------------------------------------
     def componer(self, log_escala, giro, estado, info, frame=None, ver_camara=True, ver_info=True, t=0.0,
-                 inclinacion=None):
+                 inclinacion=None, fecha=None, foco="tierra", viaje=None, seleccion=None):
         if inclinacion is None:
             inclinacion = estado.inclinacion
-        np.copyto(self.buf, self.estrellas)
-        self.tierra.dibujar(self.buf, self.w / 2.0, self.h / 2.0,
-                            self.radio_base * math.exp(log_escala), giro, inclinacion)
+        self._espacio(log_escala, giro, inclinacion, fecha or fecha_actual(), foco, viaje, t)
+        if seleccion is not None:
+            self._seleccion(seleccion)
         if estado.activo:
             self._barra_zoom(log_escala, estado.zoom_agarrado)
         self._manos(estado)
@@ -176,6 +163,115 @@ class Escena:
         self._hud(log_escala, giro, inclinacion, estado, info, ver_info)
         self._avisos(estado, t)
         return self.buf
+
+    # ------------------------------------------------------------------
+    def _cuerpos(self, jd):
+        """Astros que se dibujan como esfera: nombre -> (centro, radio en radios terrestres,
+        dibujante, rotacion marco Tierra -> marco del astro)."""
+        luna = A.luna(jd)
+        alfa = math.atan2(-luna[1], -luna[0])             # la cara visible de la Luna mira a la Tierra
+        return {
+            "tierra": (np.zeros(3), 1.0, self.tierra, np.eye(3)),
+            "luna": (luna, A.RADIO_LUNA_KM / A.RADIO_TIERRA_KM, self.luna, A.rot_z(-alfa)),
+        }
+
+    def camara(self, log_escala, giro, inclinacion, foco, jd):
+        """Camara en orbita del astro en foco: el zoom fija su tamano en pantalla.
+        giro/inclinacion se miden en el marco del astro (su longitud 0 al centro)."""
+        centro, R, _, rot = self._cuerpos(jd)[foco]
+        radio = self.radio_base * math.exp(log_escala)
+        d = R * A.distancia_para_radio(radio, self.focal)
+        atras_astro = A.punto_superficie(-math.degrees(inclinacion), -math.degrees(giro))
+        g, i = A.giro_inclinacion(rot.T @ atras_astro)
+        return A.Camara(g, i, d, self.focal, self.w / 2.0, self.h / 2.0, centro)
+
+    def _espacio(self, log_escala, giro, inclinacion, fecha, foco="tierra", viaje=None, t=0.0):
+        """Cielo, Sol y astros vistos desde la camara, en orden de profundidad."""
+        b = self.buf
+        jd = A.dia_juliano(fecha)
+        cuerpos = self._cuerpos(jd)
+        hiper = 0.0
+        if viaje is not None:
+            pos, objetivo, hiper = viaje.camara(t)
+            cam = A.Camara.mirando(pos, objetivo, self.focal, self.w / 2.0, self.h / 2.0)
+        else:
+            cam = self.camara(log_escala, giro, inclinacion, foco, jd)
+        sol_dir, sol_km = A.sol(jd)
+        sol_cam = cam.a_camara(sol_dir)
+
+        self.cielo.fondo(b, cam, A.ecuatorial_a_tierra(jd))
+
+        # proyectar los astros; el Sol queda tapado tras cualquier disco
+        vistos, vis_sol = [], 1.0
+        ang_sol = math.radians(C.SOL_ANGULO_RADIO_GRADOS)
+        for nombre, (centro, R, dib, rot) in cuerpos.items():
+            x, y, z = cam.proyectar_punto(centro)
+            dist = float(np.linalg.norm(cam.pos - centro))
+            if z <= 0 or dist <= R:
+                continue
+            r = A.radio_aparente_px(R, dist, self.focal)
+            vistos.append((z, nombre, x, y, r))
+            hacia = (centro - cam.pos) / dist
+            sep = math.acos(float(np.clip(hacia @ sol_dir, -1, 1)))
+            ang = math.asin(min(R / dist, 1.0))
+            vis_sol = min(vis_sol, float(np.clip((sep - ang + ang_sol) / (2 * ang_sol), 0.0, 1.0)))
+        sx, sy, delante = cam.proyectar_direccion(sol_dir)
+        if delante:
+            self.cielo.dibujar_sol(b, float(sx), float(sy), vis_sol)
+
+        objetivos = {}
+        for z, nombre, x, y, r in sorted(vistos, reverse=True):        # de lejos a cerca
+            centro, R, dib, rot = cuerpos[nombre]
+            if r < 1.2:                                                  # muy lejos: un punto
+                if 0 <= x < self.w and 0 <= y < self.h:
+                    col = (230, 170, 90) if nombre == "tierra" else (200, 200, 200)
+                    cv2.circle(b, (int(round(x * 16)), int(round(y * 16))), 16, col, -1, cv2.LINE_AA, 4)
+            else:
+                g, i = A.giro_inclinacion(rot @ (cam.pos - centro))
+                dib.dibujar(b, x, y, r, g, i, sol_cam, rot @ sol_dir)
+            if -r < x < self.w + r and -r < y < self.h + r:
+                objetivos[nombre] = (x, y, r)
+        for z, nombre, x, y, r in vistos:                                # tapado por otro: no se elige
+            for z2, n2, x2, y2, r2 in vistos:
+                if n2 != nombre and z2 < z and math.hypot(x - x2, y - y2) + r < r2:
+                    objetivos.pop(nombre, None)
+
+        luna = cuerpos["luna"][0]
+        self.astros = {
+            "camara": cam,
+            "foco": foco,
+            "altitud_km": (float(np.linalg.norm(cam.pos - cuerpos[foco][0])) - cuerpos[foco][1]) * A.RADIO_TIERRA_KM,
+            "luna_km": float(np.linalg.norm(luna)) * A.RADIO_TIERRA_KM,
+            "sol_km": sol_km,
+            "sol_px": (float(sx), float(sy)) if delante and vis_sol > 0.05 else None,
+            "objetivos": objetivos,
+            "hiper": hiper,
+        }
+        if C.ETIQUETAS_ASTROS and hiper < 0.05:
+            self._etiquetas()
+
+    def _etiquetas(self):
+        a, T = self.astros, self.texto
+        dentro = lambda x, y: 0 <= x < self.w - 60 and 60 <= y < self.h - 60
+        if a["sol_px"] and dentro(*a["sol_px"]):
+            x, y = a["sol_px"]
+            T.dibujar(self.buf, "Sol", x + 16, y + 10, 15, COL_TEXTO, True)
+            T.dibujar(self.buf, _km(a["sol_km"]), x + 16, y + 29, 12, COL_TENUE)
+        for nombre, (x, y, r) in a["objetivos"].items():
+            if nombre == a["foco"] or not dentro(x, y):
+                continue
+            T.dibujar(self.buf, NOMBRES[nombre], x + r + 10, y - 9, 15, COL_TEXTO, True)
+            T.dibujar(self.buf, _km(a["luna_km"]), x + r + 10, y + 10, 12, COL_TENUE)
+
+    def _seleccion(self, sel):
+        """Anillo blanco semitransparente que se llena al dejar la palma sobre un astro."""
+        x, y, p = sel
+        if x is None or p <= 0:
+            return
+        capa = self.buf.copy()
+        cv2.circle(capa, _p(x, y), 34 * 16, (255, 255, 255), 2, cv2.LINE_AA, 4)
+        cv2.ellipse(capa, _p(x, y), (34 * 16, 34 * 16), -90, 0, int(360 * p), (255, 255, 255), 6, cv2.LINE_AA, 4)
+        cv2.addWeighted(capa, 0.55, self.buf, 0.45, 0, dst=self.buf)
 
     # ------------------------------------------------------------------
     def _manos(self, estado):
@@ -271,7 +367,8 @@ class Escena:
         lado = "O" if lon < 0 else "E"
         lat = -math.degrees(inclinacion)                   # inclinar hacia arriba = se ve el sur
         hemi = "S" if lat < -0.5 else "N"
-        T.dibujar(b, f"Escala ×{math.exp(log_escala):.2f}   ·   Centro {abs(lat):.0f}° {hemi}, {abs(lon):.0f}° {lado}",
+        alt = self.astros.get("altitud_km", 0.0)
+        T.dibujar(b, f"Altitud {_km(alt)}   ·   Sobre {abs(lat):.0f}° {hemi}, {abs(lon):.0f}° {lado}",
                   20, 48, 16, COL_TEXTO)
 
         if ver_info:

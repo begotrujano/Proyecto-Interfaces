@@ -39,6 +39,7 @@ Un software educativo del espacio "en tus manos": la cámara web ve tus manos y 
 **Prototipo 2: "la Tierra como globo terráqueo"**, en `...\INTERFACES AVANZADAS\Proyecto Final\`.
 
 ### 3.1 Qué hace hoy
+- **Actualización (20 nov 2026): ahora se mueve la cámara, no la Tierra.** Los gestos orbitan una cámara alrededor de la Tierra. El Sol, la Luna (a su distancia real) y las estrellas (las ~100 más brillantes son reales y la Vía Láctea está en su lugar) se calculan para la fecha y hora actuales. El lado nocturno muestra las luces de las ciudades (NASA Black Marble 2016). Lo de abajo describe la versión anterior; el detalle actual está en `CLAUDE.md`.
 - Fondo negro con estrellas (generadas, con un velo tenue de vía láctea).
 - **La Tierra en 3D que gira sobre su eje**, como un globo real, con la textura **NASA Blue Marble** (dominio público). Tiene iluminación de día y noche con terminador suave, reflejo del sol solo en el mar y atmósfera azul en el borde. Arranca con **México al centro** (longitud −99°).
 - **Control por gestos con las dos manos**, con un esquema de activación (ver 3.2).

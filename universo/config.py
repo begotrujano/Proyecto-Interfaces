@@ -29,6 +29,39 @@ LONGITUD_INICIAL = -99.0           # grados; -99 = Mexico al centro
 SUAVIZADO_TAU = 0.045              # s; suavizado visual (independiente de la camara)
 
 # ----------------------------------------------------------------------
+# Espacio: camara en orbita, Sol, Luna y estrellas (posiciones reales)
+# ----------------------------------------------------------------------
+# Los gestos mueven la CAMARA alrededor de la Tierra (giro/inclinacion = donde esta la
+# camara; zoom = que tan cerca). El Sol, la Luna y las estrellas estan donde estan de
+# verdad en este momento, asi que el lado de dia y el de noche son los reales.
+FECHA = None                       # None = ahora mismo; o un texto ISO, p. ej. "2024-04-08T18:17:00+00:00"
+CAMPO_VISION_V = 40.0              # grados de campo de vision vertical de la camara
+TEXTURA_NOCHE = "assets/tierra_nasa_blackmarble.jpg"   # luces de ciudades (NASA Black Marble 2016)
+BRILLO_LUCES = 1.25                # intensidad del lado de noche (luces y tierra a la luz de la Luna)
+SOL_REHORNEAR_GRADOS = 0.08        # la luz del dia/noche se recalcula (en otro hilo) cuando el Sol
+                                   # se mueve esto respecto a la Tierra (0.25 grados por minuto)
+BRILLO_ESTRELLAS = 650.0           # brillo de una estrella de magnitud 1
+CONTRASTE_ESTRELLAS = 0.45         # <1 = las debiles se ven mas (1 = brillo fisico, casi no se ven)
+BRILLO_VIA_LACTEA = 0.26
+SOL_ANGULO_RADIO_GRADOS = 0.267    # radio aparente real del Sol visto desde la Tierra
+SOL_RESPLANDOR_REL = 0.42          # tamano del resplandor (fraccion del alto de la pantalla)
+BRILLO_LUNA = 0.85
+LUZ_TIERRA_EN_LUNA = 0.03          # "luz cenicienta": la Tierra ilumina un poco el lado oscuro
+TEXTURA_LUNA = "assets/luna_nasa_lroc.jpg"   # NASA SVS CGI Moon Kit (LRO), 4096x2048
+ETIQUETAS_ASTROS = True
+
+# ----------------------------------------------------------------------
+# Cambiar de astro (solo con el control EN PAUSA): deja la palma sobre un astro
+# ----------------------------------------------------------------------
+SELECCION_SOSTENER = 1.2           # s con la palma encima para elegirlo (anillo blanco)
+SELECCION_TOLERANCIA = 0.25        # s que la palma puede salirse sin perder el progreso
+SELECCION_MARGEN = 30.0            # px extra alrededor del astro que cuentan como "encima"
+SELECCION_RADIO_MIN = 18.0         # px: los astros pequenos se pueden elegir igual
+VIAJE_DURACION = 3.0               # s del viaje completo
+VIAJE_ARCO = 155.0                 # grados que rodeas el destino (el origen queda a un costado)
+VIAJE_GIRO = 0.25                  # fraccion del viaje para voltear hacia el destino            # nombre y distancia junto al Sol y la Luna
+
+# ----------------------------------------------------------------------
 # Camara
 # ----------------------------------------------------------------------
 CAM_INDICE = 0

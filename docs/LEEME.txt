@@ -1,4 +1,4 @@
-UNIVERSO EN TUS MANOS - prototipo 2 (Tierra tipo globo terraqueo)
+UNIVERSO EN TUS MANOS - prototipo 2 (la Tierra vista desde una camara en orbita)
 ==================================================================
 
 COMO EJECUTARLO (Windows, desde la carpeta raiz del proyecto, la que tiene main.py)
@@ -17,7 +17,8 @@ COMO SE USA
   2. ZOOM - mano IZQUIERDA (aro naranja):
      cierra el puno y sube = acercar, baja = alejar. Abre la mano para soltar
      y reacomodarla (como un trinquete). La barra de la izquierda muestra el zoom.
-  3. GIRO - mano DERECHA (aro azul), como un globo terraqueo:
+  3. ORBITAR - mano DERECHA (aro azul). Lo que se mueve es TU camara alrededor
+     de la Tierra (las estrellas, el Sol y la Luna se mueven con la vista):
      - swipe horizontal con la mano abierta: le da vuelo. Cada swipe suma
        velocidad; un swipe en contra la frena. El regreso de la mano se ignora.
      - puno: la agarras (se detiene) y la arrastras; si abres la mano mientras
@@ -44,12 +45,20 @@ ARCHIVOS
   universo/config.py         todos los parametros
   universo/manos.py          filtro anti-temblor, seguimiento, rol izquierda/derecha, puno y OK
   universo/control.py        activacion con OK, zoom, giro e inclinacion con swipe e inercia
-  universo/tierra.py         esfera 3D con textura que gira sobre su eje
-  universo/render.py         estrellas, guias de las manos, textos, camara en miniatura
+  universo/astros.py         posiciones reales del Sol, la Luna y las estrellas; la camara en orbita
+  universo/cielo.py          Via Lactea, estrellas, Sol y Luna
+  universo/tierra.py         la Tierra con el dia y la noche reales y las luces de las ciudades
+  universo/render.py         orden de dibujo, guias de las manos, textos, camara en miniatura
   pruebas/simulacion.py      manos 3D sinteticas para probar sin camara
   pruebas/test_proyecto.py   pruebas sin camara:  python pruebas\test_proyecto.py
   assets/  modelos/  docs/   textura de la Tierra, modelo de MediaPipe, documentacion
 
+LO QUE VES ES REAL
+  El Sol, la Luna y las estrellas estan donde estan en este momento (o en la fecha
+  de config.FECHA). El lado de dia y el de noche son los de ahora. Las distancias
+  (Luna ~384 400 km, Sol ~150 millones de km) se calculan para la fecha.
+
 CREDITOS
   Textura de la Tierra: NASA Blue Marble Next Generation (dominio publico),
   tomada del paquete basemap-data.
+  Luces de noche: NASA Earth Observatory, Black Marble 2016 (dominio publico).

@@ -88,6 +88,13 @@ class Control:
             self._soltar(0.0)
             self._avisar("Manos intercambiadas", self._t_det or 0.0)
 
+    def colocar(self, giro, inclinacion):
+        """Pone la camara en un punto de la orbita sin velocidad (al llegar a otro astro)."""
+        with self.lock:
+            self._soltar(self._t_det or 0.0)
+            self.giro, self.inclinacion = float(giro), float(inclinacion)
+            self.omega = self.omega_v = 0.0
+
     def avisar(self, texto):
         """Aviso en pantalla desde otro hilo (p. ej. al cambiar la exposicion con el teclado)."""
         with self.lock:

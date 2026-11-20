@@ -33,7 +33,9 @@ import numpy as np
 from universo import config as C
 from universo.control import Control
 from universo.manos import SeguidorManos
-from universo.render import Escena
+from universo.render import Escena, fecha_actual
+from universo.viaje import Selector, Viaje
+from universo import astros as A
 
 TITULO = "Universo en tus manos"
 
@@ -268,6 +270,9 @@ class Aplicacion:
         self.ver_info = True
         self.fps_render = 0.0
         self._t_prev = time.perf_counter()
+        self.foco = "tierra"              # astro que orbita la camara
+        self.selector = Selector()
+        self.viaje = None
 
     def iniciar(self):
         self.captura.start()
@@ -293,9 +298,49 @@ class Aplicacion:
         info = {"fps_render": self.fps_render, "fps_det": self.deteccion.fps, "lat_ms": self.deteccion.lat_ms,
                 "fps_cam": getattr(self.captura, "fps", 0.0),
                 "exposicion": getattr(self.captura, "exposicion", None)}
+        seleccion = self._elegir_astro(est, t)
+        if self.viaje is not None and self.viaje.terminado(t):
+            self._llegar()
         return self.escena.componer(self.suave.log_escala, self.suave.giro, est, info,
                                     self.captura.frame, self.ver_camara, self.ver_info, t,
-                                    self.suave.inclinacion)
+                                    self.suave.inclinacion, foco=self.foco, viaje=self.viaje,
+                                    seleccion=seleccion)
+
+    # ------------------------------------------------------------------
+    # Cambiar de astro: en pausa, palma encima del astro -> anillo blanco -> viaje
+    # ------------------------------------------------------------------
+    def _elegir_astro(self, est, t):
+        if est.activo or self.viaje is not None:
+            self.selector.reiniciar()
+            return None
+        cursores = [(v.id, v.x, v.y) for v in est.manos if v.visible]
+        objetivos = self.escena.astros.get("objetivos", {})
+        vista, elegido = self.selector.actualizar(cursores, objetivos, self.foco, t)
+        if elegido:
+            self._viajar(elegido, t)
+        return vista
+
+    def _viajar(self, destino, t):
+        jd = A.dia_juliano(fecha_actual())
+        cuerpos = self.escena._cuerpos(jd)
+        cam = self.escena.astros.get("camara")
+        if cam is None:
+            return
+        centro, R, _, _ = cuerpos[destino]
+        radio = self.escena.radio_base * math.exp(self.suave.log_escala)
+        dist = R * A.distancia_para_radio(radio, self.escena.focal)
+        self.viaje = Viaje(destino, t, cam.pos, cuerpos[self.foco][0], centro, R, dist)
+        self.control.avisar(f"Viajando a la {'Luna' if destino == 'luna' else 'Tierra'}")
+
+    def _llegar(self):
+        """Fin del viaje: la camara queda en orbita del nuevo astro, justo donde llego."""
+        v = self.viaje
+        self.viaje = None
+        self.foco = v.nombre
+        rot = self.escena._cuerpos(A.dia_juliano(fecha_actual()))[v.nombre][3]
+        giro, incl = A.giro_inclinacion(rot @ v.dir_final)
+        self.control.colocar(giro, incl)
+        self.suave.giro, self.suave.inclinacion = giro, incl
 
     def tecla(self, k):
         if k == ord(" "):
@@ -307,6 +352,7 @@ class Aplicacion:
         elif k == ord("r"):
             with self.control.lock:
                 self.control.reiniciar()
+            self.foco, self.viaje = "tierra", None
         elif k == ord("i"):
             self.control.intercambiar_manos()
         elif k in (ord("["), ord("]"), ord("e")) and hasattr(self.captura, "cambiar_exposicion"):

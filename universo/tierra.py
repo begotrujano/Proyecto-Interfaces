@@ -1,4 +1,8 @@
-"""Tierra 3D que gira sobre su eje y se inclina (como globo terraqueo), dibujada solo con OpenCV.
+"""La Tierra vista desde una camara en orbita, dibujada solo con OpenCV.
+
+La imagen es la de una camara que orbita (giro/inclinacion = donde esta la camara);
+la luz viene del Sol real, asi que al orbitar ves pasar el dia, el terminador y la
+noche con las luces de las ciudades (NASA Black Marble).
 
 Como se hace rapido:
   - Una "tabla" precalculada guarda, para cada punto del disco, su normal 3D (x, y, z).
@@ -8,12 +12,14 @@ Como se hace rapido:
   - Girar = sumar un desplazamiento a la longitud (eje polar de la Tierra).
   - Cada cuadro: 1 addWeighted (aplica el giro) + 1 cv2.remap de la textura.
     Todo en C, nada en Python puro.
-  - La iluminacion (dia/noche, brillo del mar, atmosfera) tambien esta precalculada.
+  - La iluminacion depende del Sol: n.sol se calcula con 1 cv2.transform y todo lo
+    demas (dia, ocaso naranja, luces de noche, reflejo del mar, atmosfera) son tablas LUT.
   - Piramides (mipmaps) de textura y tablas: sin parpadeo al alejar y el costo es
     proporcional al tamano en pantalla.
 """
 
 import math
+import threading
 from pathlib import Path
 
 import cv2
@@ -70,15 +76,22 @@ def textura_procedural(ancho=1024, semilla=7):
     return (np.clip(col, 0, 1) * 255).astype(np.uint8).reshape(alto, ancho, 3)
 
 
+def _leer(ruta):
+    """Imagen BGR o None. Rutas relativas a la carpeta del proyecto."""
+    if not ruta:
+        return None
+    p = Path(ruta)
+    p = p if p.is_absolute() else C.RAIZ / p
+    if not p.is_file():
+        return None
+    return cv2.imdecode(np.fromfile(str(p), np.uint8), cv2.IMREAD_COLOR)   # rutas con acentos
+
+
 def cargar_textura(ruta):
     """Equirectangular BGR (ancho = 2 x alto). Si no existe, procedural."""
-    if ruta:
-        p = Path(ruta)
-        p = p if p.is_absolute() else C.RAIZ / p
-        if p.is_file():
-            img = cv2.imdecode(np.fromfile(str(p), np.uint8), cv2.IMREAD_COLOR)  # rutas con acentos
-            if img is not None:
-                return img, p.name
+    img = _leer(ruta)
+    if img is not None:
+        return img, Path(ruta).name
     return textura_procedural(), "procedural"
 
 
@@ -92,11 +105,10 @@ def mascara_oceano(bgr):
     return (cv2.GaussianBlur(m.astype(np.float32), (0, 0), sigma) * 255).astype(np.uint8)
 
 
-def piramide_textura(bgr, ancho_min=128):
-    """Niveles BGRA (A = mar), reduciendo a la mitad con envoltura horizontal."""
-    if bgr.shape[1] != 2 * bgr.shape[0]:
-        bgr = cv2.resize(bgr, (2 * bgr.shape[0], bgr.shape[0]), interpolation=cv2.INTER_AREA)
-    nivel = np.ascontiguousarray(np.dstack([bgr, mascara_oceano(bgr)]))
+def _piramide(img, ancho_min=128):
+    """Niveles de la textura (cualquier numero de canales), reduciendo a la mitad con
+    envoltura horizontal."""
+    nivel = np.ascontiguousarray(img)
     niveles = [nivel]
     while nivel.shape[1] // 2 >= ancho_min:
         pad = 4
@@ -110,7 +122,9 @@ def piramide_textura(bgr, ancho_min=128):
 # ----------------------------------------------------------------------
 # Tablas de la esfera e iluminacion (en el plano de la imagen)
 # ----------------------------------------------------------------------
-def tablas_esfera(R=600, margen=1.18):
+def tablas_esfera(R=600, margen=1.18, atmosfera=True):
+    """Tabla de normales (marco de la camara) y geometria fija del disco.
+    La iluminacion ya NO se precalcula: depende de donde este el Sol respecto a la camara."""
     S = 2 * int(math.ceil(margen * R)) + 2
     c = (S - 1) / 2.0
     ys, xs = np.mgrid[0:S, 0:S].astype(np.float32)
@@ -118,89 +132,185 @@ def tablas_esfera(R=600, margen=1.18):
     r = np.sqrt(u * u + v * v)
 
     # --- Normal 3D de cada punto (x derecha, y abajo, z hacia ti). Fuera del disco
-    #     se prolonga el borde. Sin girar ni inclinar: lon 0 / lat 0 al centro. ---
+    #     se prolonga el borde (asi el halo de la atmosfera "sabe" de que lado le da el Sol). ---
     rc = np.minimum(r, 0.9995)
     k = np.where(r > 1e-9, rc / np.maximum(r, 1e-9), 1.0)
     uc, vc = u * k, v * k
     zc = np.sqrt(np.clip(1.0 - uc * uc - vc * vc, 0.0, 1.0))
     tabla = np.dstack([uc, vc, zc]).astype(np.float32)
 
-    # --- Iluminacion: sol arriba a la izquierda, un poco de frente ---
-    luz = np.array([-0.62, -0.38, 0.69], np.float32)
-    luz /= np.linalg.norm(luz)
+    # --- Geometria: borde del disco, opacidad y cuanta atmosfera atraviesa la vista ---
     z = np.sqrt(np.clip(1.0 - r * r, 0.0, 1.0))
-    ndl = u * luz[0] + v * luz[1] + z * luz[2]
-    dia = _suave(-0.10, 0.45, ndl)                         # terminador suave
-    mul = 0.07 + 1.12 * dia
-    h = luz + np.array([0, 0, 1], np.float32)
-    h /= np.linalg.norm(h)
-    spec = np.clip(u * h[0] + v * h[1] + z * h[2], 0, 1) ** 40 * 0.30 * dia
-    borde = (1.0 - z) ** 2.4
-    brillo_borde = borde * (0.15 + 0.85 * dia) * 0.95
-
     a_disco = np.clip((1.0 - r) * R + 0.5, 0.0, 1.0)
     fuera = r > 1.0
-    halo = np.exp(-(r - 1.0) / 0.03) * fuera
-    dir_luz = np.clip(((u * luz[0] + v * luz[1]) / (r + 1e-6)) * 0.5 + 0.5, 0.0, 1.0)
-    halo = halo * (0.15 + 0.85 * dir_luz ** 1.5) * 0.85
+    halo = np.exp(-(r - 1.0) / 0.03) * fuera * (0.85 if atmosfera else 0.0)
     halo *= np.clip((margen - 0.02 - r) / 0.06, 0.0, 1.0)
     halo *= 1.0 - a_disco
-    alfa = np.clip(a_disco + halo, 0.0, 1.0)
+    alfa = np.clip(a_disco + 0.6 * halo, 0.0, 1.0)
+    atm = (a_disco * (1.0 - z) ** 2.4 * 0.95 + halo) * (1.0 if atmosfera else 0.0)
 
-    # 4 canales: luz (x200), reflejo del sol, alfa, brillo de atmosfera (se colorea al dibujar)
-    luz = np.dstack([np.clip(mul * a_disco * ESCALA_MUL, 0, 255),
-                     np.clip(spec * a_disco * 255, 0, 255),
-                     alfa * 255,
-                     np.clip((a_disco * brillo_borde + halo) * 255, 0, 255)])
-    return tabla, (luz + 0.5).astype(np.uint8), R
+    geo = np.dstack([a_disco, alfa, np.clip(atm, 0, 1), np.zeros_like(r)]) * 255.0
+    return tabla, (geo + 0.5).astype(np.uint8), R
 
 
-def piramide_tablas(tabla, luz, R, paso=0.7071, radio_min=6.0):
+def piramide_tablas(tabla, geo, R, paso=0.7071, radio_min=6.0):
     S = tabla.shape[0]
     niveles, f = [], 1.0
     while R * f >= radio_min:
         lado = max(int(round(S * f)), 8)
         if lado == S:
-            t, l = tabla, luz
+            t, g = tabla, geo
         else:
             t = cv2.resize(tabla, (lado, lado), interpolation=cv2.INTER_AREA)
-            l = cv2.resize(luz, (lado, lado), interpolation=cv2.INTER_AREA)
-        niveles.append((np.ascontiguousarray(t), np.ascontiguousarray(l), R * lado / S))
+            g = cv2.resize(geo, (lado, lado), interpolation=cv2.INTER_AREA)
+        niveles.append((np.ascontiguousarray(t), np.ascontiguousarray(g), R * lado / S))
         f *= paso
     return niveles
 
 
 # ----------------------------------------------------------------------
+# Curvas de luz (tablas de 256 valores; el indice codifica un coseno: v = 127.5 * (1 + cos))
+# ----------------------------------------------------------------------
+_COS = np.arange(256, dtype=np.float64) / 127.5 - 1.0
+
+
+def _luts_luz(contraluz, ocaso_naranja=True):
+    """-> (dia BGR x200, noche BGR 0..255, dia gris 0..255, atmosfera 0..255) en funcion de n.sol."""
+    x = _COS
+    lambert = np.clip(x, 0.0, 1.0) ** 0.6
+    dia = _suave(-0.10, 0.20, x) * (0.42 + 0.80 * lambert)
+    # crepusculo: la luz que cruza mucha atmosfera se pone naranja junto al terminador
+    ocaso = np.exp(-((x - 0.04) / 0.09) ** 2) * (1.0 if ocaso_naranja else 0.0)
+    tinte = np.stack([1.0 - 0.45 * ocaso, 1.0 - 0.12 * ocaso, 1.0 + 0.25 * ocaso], -1)
+    lut_dia = np.clip(dia[:, None] * tinte * ESCALA_MUL, 0, 255)
+    # las ciudades se encienden al anochecer (despues del terminador)
+    noche = 1.0 - _suave(-0.16, 0.03, x)
+    lut_noche = np.clip(noche[:, None] * np.array([1.0, 1.0, 1.0]) * 255.0, 0, 255)
+    lut_dia1 = np.clip(_suave(-0.02, 0.20, x) * 255.0, 0, 255)
+    # atmosfera: brilla donde le da el Sol; a contraluz (Sol detras) se enciende todo el anillo
+    atm = 0.10 + 0.90 * _suave(-0.30, 0.35, x)
+    atm = np.maximum(atm, contraluz * np.exp(-(x / 0.35) ** 2))
+    lut_atm = np.clip(atm * 255.0, 0, 255)
+    a8 = lambda a: a.astype(np.uint8)
+    return (a8(lut_dia).reshape(1, 256, 3), a8(lut_noche).reshape(1, 256, 3),
+            a8(lut_dia1).reshape(1, 256, 1), a8(lut_atm).reshape(1, 256, 1))
+
+
+def _lut_brillo():
+    """Reflejo del Sol en el mar: n.h -> brillo. El indice es 255 * n.h (solo la parte
+    positiva, el doble de precision que n.sol: sin anillos en el punto brillante)."""
+    x = np.arange(256, dtype=np.float64) / 255.0
+    return np.clip((0.30 * x ** 28 + 0.07 * x ** 6) * 255.0, 0, 255).astype(np.uint8).reshape(1, 256, 1)
+
+
+LUT_BRILLO_MAR = _lut_brillo()
+
+
+def iluminar_textura(dia, mar, noche, sol_tierra, ocaso_naranja=True):
+    """Hornea la luz del Sol en la textura (marco de la Tierra): dia, ocaso, noche con
+    luces y, en el canal A, donde puede reflejar el mar. -> BGRA del mismo tamano.
+
+    Esto no depende de la camara, solo de donde esta el Sol, que respecto a la Tierra
+    se mueve 0.25 grados por minuto: se recalcula pocas veces y en otro hilo."""
+    H, W = dia.shape[:2]
+    lat = (math.pi / 2 - (np.arange(H) + 0.5) / H * math.pi).astype(np.float32)
+    lon = ((np.arange(W) + 0.5) / W * 2 * math.pi - math.pi).astype(np.float32)
+    s = np.asarray(sol_tierra, np.float64)
+    lat_s, lon_s = math.asin(float(np.clip(s[2], -1, 1))), math.atan2(s[1], s[0])
+    # n.sol = cos(lat) cos(lat_s) cos(lon - lon_s) + sin(lat) sin(lat_s)  (separable: filas x columnas)
+    a = (np.cos(lat) * math.cos(lat_s) * 127.5)[:, None]
+    b = np.cos(lon - lon_s)[None, :]
+    c = (np.sin(lat) * math.sin(lat_s) * 127.5 + 127.5)[:, None]
+    nd8 = np.clip(a * b + c, 0, 255).astype(np.uint8)
+    lut_dia, lut_noche, lut_dia1, _ = _luts_luz(0.0, ocaso_naranja)
+    nd3 = cv2.cvtColor(nd8, cv2.COLOR_GRAY2BGR)
+    color = cv2.multiply(dia, cv2.LUT(nd3, lut_dia), scale=1.0 / ESCALA_MUL)
+    if noche is not None:
+        color = cv2.add(color, cv2.multiply(noche, cv2.LUT(nd3, lut_noche), scale=C.BRILLO_LUCES / 255.0))
+    reflejo = cv2.multiply(mar, cv2.LUT(nd8, lut_dia1), scale=1.0 / 255.0)
+    return np.ascontiguousarray(np.dstack([color, reflejo]))
+
+
+# ----------------------------------------------------------------------
 class Tierra:
-    def __init__(self, ruta_textura=None, R=600):
+    def __init__(self, ruta_textura=None, R=600, ruta_noche=None, atmosfera=True):
+        self.atmosfera = atmosfera                        # la Luna no tiene: ni halo azul ni ocaso naranja
         bgr, self.origen = cargar_textura(ruta_textura)
-        self.texturas = piramide_textura(bgr)
-        self.niveles = piramide_tablas(*tablas_esfera(R))
+        if bgr.shape[1] != 2 * bgr.shape[0]:
+            bgr = cv2.resize(bgr, (2 * bgr.shape[0], bgr.shape[0]), interpolation=cv2.INTER_AREA)
+        self._dia, self._mar = bgr, mascara_oceano(bgr)
+        self._noche, self.origen_noche = None, "sin luces"
+        noche = _leer(ruta_noche)
+        if noche is not None:
+            if noche.shape[:2] != bgr.shape[:2]:
+                noche = cv2.resize(noche, (bgr.shape[1], bgr.shape[0]), interpolation=cv2.INTER_AREA)
+            self._noche, self.origen_noche = noche, Path(ruta_noche).name
+        self.niveles = piramide_tablas(*tablas_esfera(R, atmosfera=atmosfera))
         self._cache = None
         self._cache_incl = None
+        self._luts = (None, None)
 
-    def dibujar(self, buf, cx, cy, radio, giro, inclinacion=0.0):
+        # textura iluminada (piramide BGRA). Se rehace en otro hilo cuando el Sol se mueve.
+        self.texturas = None                              # se hornea con el primer Sol que llegue
+        self._sol_horneado = None
+        self._hilo = None
+
+    # ------------------------------------------------------------------
+    def iluminar(self, sol_tierra, esperar=False):
+        """Pide hornear la luz para esta posicion del Sol (marco de la Tierra). Solo trabaja si
+        el Sol se movio mas de config.SOL_REHORNEAR_GRADOS desde la ultima vez."""
+        s = np.asarray(sol_tierra, np.float64)
+        s = s / np.linalg.norm(s)
+        if self._sol_horneado is not None:
+            ang = math.degrees(math.acos(float(np.clip(s @ self._sol_horneado, -1, 1))))
+            if ang < C.SOL_REHORNEAR_GRADOS:
+                return
+        esperar = esperar or self.texturas is None        # la primera vez no hay nada que mostrar aun
+        if self._hilo is not None and self._hilo.is_alive():
+            if not esperar:
+                return
+            self._hilo.join()
+        self._sol_horneado = s
+
+        def trabajo():
+            lit = iluminar_textura(self._dia, self._mar, self._noche, s, self.atmosfera)
+            self.texturas = _piramide(lit)               # cambio atomico: el dibujo nunca ve media textura
+
+        if esperar:
+            trabajo()
+        else:
+            self._hilo = threading.Thread(target=trabajo, daemon=True, name="iluminar_tierra")
+            self._hilo.start()
+
+    def dibujar(self, buf, cx, cy, radio, giro, inclinacion=0.0, sol=(-0.62, -0.38, 0.69), sol_tierra=None):
         """Compone la Tierra sobre buf (BGR uint8) centrada en (cx, cy).
         giro en radianes: positivo = la superficie de enfrente se mueve a la derecha.
-        inclinacion en radianes: positivo = la superficie de enfrente sube (se ve el sur)."""
+        inclinacion en radianes: positivo = la superficie de enfrente sube (se ve el sur).
+        sol: direccion hacia el Sol en el marco de la camara (x derecha, y abajo, z hacia ti).
+        sol_tierra: la misma direccion en el marco de la Tierra (para hornear el dia y la noche)."""
+        if sol_tierra is not None:
+            self.iluminar(sol_tierra)
+        elif self.texturas is None:
+            self.iluminar(np.array([0.70, -0.42, 0.58]))  # sin Sol real: de frente, arriba a la izquierda
         if radio < 1.0:
             return
         alto, ancho = buf.shape[:2]
 
-        radio = round(radio * 20.0) / 20.0               # permite reutilizar la luz entre cuadros
+        radio = round(radio * 20.0) / 20.0               # permite reutilizar la geometria entre cuadros
         clave = (radio, round(cx * 20.0), round(cy * 20.0), ancho, alto)
         if self._cache is None or self._cache[0] != clave:
             self._cache = (clave,) + self._preparar(radio, cx, cy, ancho, alto)
             self._cache_incl = None
-        _, region, normales, mul3, spec, inv3, atm3 = self._cache
+        _, region, normales, mitad, a_disco, w_disco, w_fondo, atm_mag = self._cache
         if region is None:
             return
         x0, y0, x1, y1 = region
-
+        w, h = x1 - x0, y1 - y0
 
         # textura: ~1 texel por pixel en el ecuador
-        tex = self.texturas[0]
-        for cand in self.texturas:
+        texturas = self.texturas
+        tex = texturas[0]
+        for cand in texturas:
             if cand.shape[1] >= 2 * math.pi * radio:
                 tex = cand
             else:
@@ -221,12 +331,38 @@ class Tierra:
         desplaz = -(giro % (2 * math.pi)) / (2 * math.pi) * Wt
         mapa_x = cv2.addWeighted(lon, Wt / (2 * math.pi), lon, 0.0, Wt / 2 + desplaz - 0.5)
         muestra = cv2.remap(tex, mapa_x, mapa_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+        color = cv2.cvtColor(muestra, cv2.COLOR_BGRA2BGR)
 
-        color = cv2.multiply(cv2.cvtColor(muestra, cv2.COLOR_BGRA2BGR), mul3, scale=1.0 / ESCALA_MUL)
-        reflejo = cv2.multiply(spec, cv2.extractChannel(muestra, 3), scale=1.0 / 255.0)
-        color = cv2.add(cv2.add(color, cv2.cvtColor(reflejo, cv2.COLOR_GRAY2BGR)), atm3)
-        roi = buf[y0:y1, x0:x1]
-        buf[y0:y1, x0:x1] = cv2.add(cv2.multiply(roi, inv3, scale=1.0 / 255.0), color)
+        # --- Lo que depende de la vista (a media resolucion: es suave) ---
+        s = np.asarray(sol, np.float64)
+        s = s / (np.linalg.norm(s) + 1e-12)
+        hv = s + np.array([0.0, 0.0, 1.0])
+        hv = hv / np.linalg.norm(hv) if np.linalg.norm(hv) > 1e-6 else np.array([0.0, 0.0, 1.0])
+        m_nd = np.array([[127.5 * s[0], 127.5 * s[1], 127.5 * s[2], 127.5]], np.float32)
+        m_nh = np.array([[255.0 * hv[0], 255.0 * hv[1], 255.0 * hv[2], 0.0]], np.float32)
+        contraluz = round(float(np.clip(-s[2], 0.0, 1.0)) ** 3 * 1.6, 2)
+        if self._luts[0] != contraluz:
+            self._luts = (contraluz, _luts_luz(contraluz)[3])
+        lut_atm = self._luts[1]
+
+        # atmosfera (azul) + reflejo del mar (blanco), todo a media resolucion y luego se escala
+        hm, wm = mitad.shape[:2]
+        nd8 = cv2.convertScaleAbs(cv2.transform(mitad, m_nd))
+        nh8 = cv2.convertScaleAbs(cv2.max(cv2.transform(mitad, m_nh), 0.0))   # solo la parte positiva
+        atm = cv2.multiply(atm_mag, cv2.LUT(nd8, lut_atm), scale=1.0 / 255.0)
+        mar = cv2.resize(cv2.extractChannel(muestra, 3), (wm, hm), interpolation=cv2.INTER_AREA)
+        brillo = cv2.multiply(cv2.multiply(mar, cv2.LUT(nh8, LUT_BRILLO_MAR), scale=1.0 / 255.0),
+                              a_disco, scale=1.0 / 255.0)   # el reflejo no sale del disco
+        resplandor = cv2.merge([cv2.add(atm, brillo),
+                                cv2.addWeighted(atm, ATM[1], brillo, 1.0, 0.0),
+                                cv2.addWeighted(atm, ATM[2], brillo, 1.0, 0.0)])
+        resplandor = cv2.resize(resplandor, (w, h), interpolation=cv2.INTER_LINEAR)
+
+        if w_fondo is None:                               # la Tierra llena toda la region (zoom grande)
+            cv2.add(color, resplandor, dst=buf[y0:y1, x0:x1])
+        else:
+            roi = buf[y0:y1, x0:x1]
+            buf[y0:y1, x0:x1] = cv2.add(cv2.blendLinear(color, roi, w_disco, w_fondo), resplandor)
 
     @staticmethod
     def _latlon(normales, incl):
@@ -241,12 +377,12 @@ class Tierra:
         return lon, colat
 
     def _preparar(self, radio, cx, cy, ancho, alto):
-        """Lo que solo depende del tamano y la posicion (no del giro ni de la inclinacion):
-        se calcula una vez y se reutiliza mientras la Tierra solo gira o se inclina."""
-        tabla, luz, Rl = self.niveles[0]
+        """Lo que solo depende del tamano y la posicion (no del giro, la inclinacion ni el Sol):
+        se calcula una vez y se reutiliza mientras la Tierra no cambie de tamano."""
+        tabla, geo, Rl = self.niveles[0]
         for niv in self.niveles:                          # el mas chico que aun alcanza
             if niv[2] >= radio:
-                tabla, luz, Rl = niv
+                tabla, geo, Rl = niv
             else:
                 break
         s = radio / Rl
@@ -256,13 +392,19 @@ class Tierra:
         x0, x1 = max(int(cx - mitad), 0), min(int(cx + mitad) + 1, ancho)
         y0, y1 = max(int(cy - mitad), 0), min(int(cy + mitad) + 1, alto)
         if x1 <= x0 or y1 <= y0:
-            return (None,) * 6
+            return (None,) * 7
         w, h = x1 - x0, y1 - y0
         M = np.array([[s, 0, cx - s * c - x0], [0, s, cy - s * c - y0]], np.float32)
         t = cv2.warpAffine(tabla, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-        l = cv2.warpAffine(luz, M, (w, h), flags=cv2.INTER_LINEAR,
+        g = cv2.warpAffine(geo, M, (w, h), flags=cv2.INTER_LINEAR,
                            borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
-        mul, spec, alfa, brillo_atm = cv2.split(l)
-        return ((x0, y0, x1, y1), tuple(cv2.split(t)), cv2.cvtColor(mul, cv2.COLOR_GRAY2BGR), spec,
-                cv2.cvtColor(255 - alfa, cv2.COLOR_GRAY2BGR),
-                cv2.LUT(cv2.cvtColor(brillo_atm, cv2.COLOR_GRAY2BGR), LUT_ATM))
+        a_disco, alfa, atm, _ = cv2.split(g)
+        tam_mitad = (max(w // 2, 1), max(h // 2, 1))
+        t_mitad = cv2.resize(t, tam_mitad, interpolation=cv2.INTER_AREA)
+        a_mitad = cv2.resize(a_disco, tam_mitad, interpolation=cv2.INTER_AREA)
+        atm_mitad = cv2.resize(atm, tam_mitad, interpolation=cv2.INTER_AREA)
+        w_disco = a_disco.astype(np.float32) / 255.0
+        w_fondo = 1.0 - alfa.astype(np.float32) / 255.0
+        if int(a_disco.min()) == 255:                     # todo es Tierra: no hace falta mezclar con el fondo
+            w_fondo = None
+        return ((x0, y0, x1, y1), tuple(cv2.split(t)), t_mitad, a_mitad, w_disco, w_fondo, atm_mitad)
