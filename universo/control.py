@@ -25,8 +25,8 @@ from collections import namedtuple
 
 import numpy as np
 
-import config as C
-from manos import a_lienzo
+from universo import config as C
+from universo.manos import a_lienzo
 
 ManoVista = namedtuple(
     "ManoVista",

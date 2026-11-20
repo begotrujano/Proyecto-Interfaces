@@ -86,31 +86,35 @@ Lo pidió el autor después de probar la versión anterior. En esa versión hab�
 - **Python 3.14** (instalado en `C:\Users\mendo\AppData\Local\Programs\Python\Python314`).
 - **Entorno virtual:** `Proyecto Final\.venv`, ya creado e instalado. `.vscode/settings.json` apunta a `${workspaceFolder}\.venv\Scripts\python.exe`.
 - **Librerías** (`requirements.txt`: opencv-python, mediapipe, numpy, pillow). Versiones instaladas: **mediapipe 1.2.3, opencv-python 5.1, numpy 2.5, pillow 13**.
-- **Modelo:** `gesture_recognizer.task` (MediaPipe Gesture Recognizer, float16, ~8 MB) en la raíz del proyecto. Se usa por sus **21 landmarks por mano**, en imagen y en 3D "world", y por su **handedness**. Las categorías de gesto que trae (Closed_Fist, Open_Palm…) **no se usan**: las poses se calculan con geometría propia. No incluye "OK".
+- **Modelo:** `modelos/gesture_recognizer.task` (MediaPipe Gesture Recognizer, float16, ~8 MB). Se usa por sus **21 landmarks por mano**, en imagen y en 3D "world", y por su **handedness**. Las categorías de gesto que trae (Closed_Fist, Open_Palm…) **no se usan**: las poses se calculan con geometría propia. No incluye "OK".
 - **Cámara:** índice 0, 640×480 a 60 FPS pedidos, MJPG, buffer de 1. La imagen se voltea en espejo **antes** de detectar, así que la etiqueta "Left" de MediaPipe corresponde a la mano izquierda real.
 - **Render:** solo OpenCV + numpy, sin GPU. Ventana de OpenCV de 1280×720 internos, redimensionable y con pantalla completa.
 - **Ejecutar:**
   ```powershell
   cd "C:\Users\mendo\Documents\UV\5TO SEMESTRE\INTERFACES AVANZADAS\Proyecto Final"
   .venv\Scripts\python.exe main.py            # opciones: --camara 1  --dshow  --pantalla-completa
-  .venv\Scripts\python.exe test_proyecto.py   # pruebas sin cámara
+  .venv\Scripts\python.exe pruebas\test_proyecto.py   # pruebas sin cámara
   ```
 
 ## 5. Estructura del código
 
 ```
 Proyecto Final/
-├── main.py              ventana, teclado y los 3 hilos (captura, detección, dibujo)
-├── config.py            TODOS los parámetros ajustables (con guía de calibración al inicio)
-├── manos.py             filtro One Euro, seguimiento de 2 manos, rol izq/der, poses (puño, OK)
-├── control.py           máquina de estados: activación con OK, zoom, giro (swipe, agarre, inercia)
-├── tierra.py            esfera 3D texturizada que gira sobre su eje (tablas + mipmaps)
-├── render.py            estrellas, Tierra, cursores, barra de zoom, HUD, textos (Pillow), miniatura de cámara
-├── simulacion.py        manos 3D sintéticas (formato idéntico a MediaPipe) para pruebas
-├── test_proyecto.py     17 pruebas sin cámara (unitarias + integración real con hilos)
-├── gesture_recognizer.task
+├── main.py                  entrada: ventana, teclado y los 3 hilos (captura, detección, dibujo)
+├── requirements.txt · CLAUDE.md (debe quedarse en la raíz)
+├── universo/                el programa (paquete)
+│   ├── config.py            TODOS los parámetros ajustables (con guía de calibración al inicio)
+│   ├── manos.py             filtro One Euro, seguimiento de 2 manos, rol izq/der, poses (puño, OK)
+│   ├── control.py           máquina de estados: activación con OK, zoom, giro e inclinación (swipe, agarre, inercia)
+│   ├── tierra.py            esfera 3D texturizada que gira y se inclina (normales 3D + mipmaps)
+│   └── render.py            estrellas, Tierra, cursores, barra de zoom, HUD, textos (Pillow), miniatura de cámara
+├── pruebas/
+│   ├── test_proyecto.py     pruebas sin cámara (unitarias + integración real con hilos)
+│   ├── simulacion.py        manos 3D sintéticas (formato idéntico a MediaPipe)
+│   └── capturas/            PNG que generan las pruebas
 ├── assets/tierra_nasa_bluemarble.jpg   (4096×2048, equirectangular)
-├── requirements.txt · LEEME.txt (instrucciones de uso en español)
+├── modelos/gesture_recognizer.task
+├── docs/                    CONTEXTO_PROYECTO.md (este archivo) · LEEME.txt (instrucciones de uso)
 ├── .venv/ · .vscode/settings.json
 ```
 
@@ -178,7 +182,7 @@ Proyecto Final/
 ## 8. Pendientes y siguientes pasos
 
 **Inmediato:**
-- Probar con la cámara real y calibrar en `config.py`: OK_ON, PUNO_ON, SWIPE_V_ON, GANANCIA_ZOOM.
+- Probar con la cámara real y calibrar en `universo/config.py`: OK_ON, PUNO_ON, SWIPE_V_ON, GANANCIA_ZOOM.
 - Confirmar que la detección izquierda/derecha sale bien.
 - Medir los FPS reales en la laptop.
 

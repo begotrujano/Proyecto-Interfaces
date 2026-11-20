@@ -19,7 +19,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-AQUI = Path(__file__).resolve().parent
+from universo import config as C
+
 ATM = np.array([1.0, 0.66, 0.36], np.float32)      # BGR, azul atmosfera
 # tabla de color: brillo (0..255) -> azul de la atmosfera (mucho mas rapido que multiplicar)
 LUT_ATM = np.clip(np.arange(256)[:, None] * ATM, 0, 255).astype(np.uint8).reshape(1, 256, 3)
@@ -73,7 +74,7 @@ def cargar_textura(ruta):
     """Equirectangular BGR (ancho = 2 x alto). Si no existe, procedural."""
     if ruta:
         p = Path(ruta)
-        p = p if p.is_absolute() else AQUI / p
+        p = p if p.is_absolute() else C.RAIZ / p
         if p.is_file():
             img = cv2.imdecode(np.fromfile(str(p), np.uint8), cv2.IMREAD_COLOR)  # rutas con acentos
             if img is not None:

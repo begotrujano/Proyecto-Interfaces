@@ -7,8 +7,8 @@ from collections import OrderedDict, deque
 import cv2
 import numpy as np
 
-import config as C
-from tierra import Tierra
+from universo import config as C
+from universo.tierra import Tierra
 
 COL_IZQ = (40, 178, 255)        # BGR ambar   -> zoom
 COL_DER = (255, 208, 84)        # BGR cian    -> giro

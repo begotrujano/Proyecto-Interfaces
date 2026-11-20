@@ -30,13 +30,12 @@ os.environ.setdefault("GLOG_minloglevel", "2")
 import cv2
 import numpy as np
 
-import config as C
-from control import Control
-from manos import SeguidorManos
-from render import Escena
+from universo import config as C
+from universo.control import Control
+from universo.manos import SeguidorManos
+from universo.render import Escena
 
 TITULO = "Universo en tus manos"
-AQUI = Path(__file__).resolve().parent
 
 
 # ----------------------------------------------------------------------
@@ -72,11 +71,8 @@ def fijar_exposicion(cap, valor):
 
 
 def buscar_modelo():
-    for carpeta in (AQUI, AQUI.parent):
-        ruta = carpeta / C.MODELO
-        if ruta.is_file():
-            return ruta
-    return None
+    ruta = C.RAIZ / C.MODELO
+    return ruta if ruta.is_file() else None
 
 
 class DetectorMediaPipe:
@@ -359,7 +355,7 @@ def main():
 
     ruta = buscar_modelo()
     if ruta is None:
-        print(f"Falta {C.MODELO}. Ponlo en {AQUI}.")
+        print(f"Falta {C.MODELO}. Ponlo en {C.RAIZ}.")
         return 1
     cap = abrir_camara(args.camara, args.dshow)
     if cap is None:

@@ -1,7 +1,7 @@
 UNIVERSO EN TUS MANOS - prototipo 2 (Tierra tipo globo terraqueo)
 ==================================================================
 
-COMO EJECUTARLO (Windows, desde esta carpeta)
+COMO EJECUTARLO (Windows, desde la carpeta raiz del proyecto, la que tiene main.py)
   Opcion rapida, con el entorno que ya tienes en imAgen:
       "..\imAgen\.venv\Scripts\python.exe" main.py
   Opcion limpia, con su propio entorno:
@@ -30,7 +30,7 @@ TECLAS
   Espacio activar/pausar   R reiniciar   I intercambiar manos   V camara
   H informacion de depuracion   F pantalla completa   Q o Esc salir
 
-SI ALGO NO SE SIENTE BIEN -> config.py (tiene la guia al inicio)
+SI ALGO NO SE SIENTE BIEN -> universo\config.py (tiene la guia al inicio)
   Con la tecla H ves en vivo los numeros de cada mano:
     puno  < 1.30 = puno cerrado      ok < 0.33 y dedos >= 2 = OK
   - El OK no activa:          sube OK_ON (0.33 -> 0.40)
@@ -40,14 +40,15 @@ SI ALGO NO SE SIENTE BIEN -> config.py (tiene la guia al inicio)
   - Zoom muy rapido/lento:    GANANCIA_ZOOM
 
 ARCHIVOS
-  main.py          ventana y los 3 hilos (camara, deteccion, dibujo)
-  manos.py         filtro anti-temblor, seguimiento, rol izquierda/derecha, puno y OK
-  control.py       activacion con OK, zoom, giro con swipe e inercia
-  tierra.py        esfera 3D con textura que gira sobre su eje
-  render.py        estrellas, guias de las manos, textos, camara en miniatura
-  config.py        todos los parametros
-  simulacion.py    manos 3D sinteticas para probar sin camara
-  test_proyecto.py 17 pruebas sin camara:  python test_proyecto.py
+  main.py                    entrada: ventana y los 3 hilos (camara, deteccion, dibujo)
+  universo/config.py         todos los parametros
+  universo/manos.py          filtro anti-temblor, seguimiento, rol izquierda/derecha, puno y OK
+  universo/control.py        activacion con OK, zoom, giro e inclinacion con swipe e inercia
+  universo/tierra.py         esfera 3D con textura que gira sobre su eje
+  universo/render.py         estrellas, guias de las manos, textos, camara en miniatura
+  pruebas/simulacion.py      manos 3D sinteticas para probar sin camara
+  pruebas/test_proyecto.py   pruebas sin camara:  python pruebas\test_proyecto.py
+  assets/  modelos/  docs/   textura de la Tierra, modelo de MediaPipe, documentacion
 
 CREDITOS
   Textura de la Tierra: NASA Blue Marble Next Generation (dominio publico),

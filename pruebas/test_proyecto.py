@@ -1,6 +1,6 @@
 """Pruebas sin camara: manos simuladas -> seguimiento -> control -> dibujo.
 
-Ejecutar:  python test_proyecto.py      (guarda capturas en ./_pruebas)
+Ejecutar:  python pruebas/test_proyecto.py      (guarda capturas en pruebas/capturas)
 """
 
 import math
@@ -10,13 +10,15 @@ from pathlib import Path
 
 import numpy as np
 
-import config as C
-from control import Control
-from manos import OneEuro, SeguidorManos, medir_pose
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # para importar universo y main
+
+from universo import config as C
+from universo.control import Control
+from universo.manos import OneEuro, SeguidorManos, medir_pose
 from simulacion import mano
 
 CAM_W, CAM_H = 640, 480
-SALIDA = Path(__file__).with_name("_pruebas")
+SALIDA = Path(__file__).with_name("capturas")
 X_IZQ, X_DER, Y0 = 0.30, 0.70, 0.55
 
 
@@ -355,8 +357,8 @@ def test_pausa_automatica():
 
 def test_render():
     import cv2
-    from control import Estado, ManoVista
-    from render import Escena
+    from universo.control import Estado, ManoVista
+    from universo.render import Escena
     SALIDA.mkdir(exist_ok=True)
     esc = Escena()
     n, _, _, _ = mano("abierta", 0.3, 0.5, "Left")

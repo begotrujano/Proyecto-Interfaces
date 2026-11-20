@@ -9,7 +9,7 @@ import math
 
 import numpy as np
 
-import config as C
+from universo import config as C
 
 DOS_PI = 2.0 * math.pi
 PALMA = (0, 5, 9, 13, 17)                       # muneca y nudillos: no cambian al cerrar la mano

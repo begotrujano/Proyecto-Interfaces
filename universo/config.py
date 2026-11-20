@@ -17,10 +17,14 @@ Guia rapida para afinar (mira los numeros de depuracion en pantalla, tecla H):
 # ----------------------------------------------------------------------
 # Ventana y render
 # ----------------------------------------------------------------------
+from pathlib import Path
+
+RAIZ = Path(__file__).resolve().parent.parent   # carpeta del proyecto (la de main.py)
+
 ANCHO, ALTO = 1280, 720            # resolucion interna del lienzo
 FPS_RENDER = 60
 RADIO_BASE_REL = 0.24              # radio de la Tierra a escala 1 (fraccion del alto)
-TEXTURA = "assets/tierra_nasa_bluemarble.jpg"   # si falta, se genera una procedural
+TEXTURA = "assets/tierra_nasa_bluemarble.jpg"   # relativo a RAIZ; si falta, se genera una procedural
 LONGITUD_INICIAL = -99.0           # grados; -99 = Mexico al centro
 SUAVIZADO_TAU = 0.045              # s; suavizado visual (independiente de la camara)
 
@@ -43,7 +47,7 @@ CAM_EXPOSICION_MANUAL = -6     # desde donde empiezan [ y ] si estaba en automat
 # ----------------------------------------------------------------------
 # Deteccion (MediaPipe)
 # ----------------------------------------------------------------------
-MODELO = "gesture_recognizer.task"
+MODELO = "modelos/gesture_recognizer.task"   # relativo a RAIZ
 NUM_MANOS = 2
 SOLO_LANDMARKER = True         # solo el detector de puntos (mas rapido); False = GestureRecognizer completo
 CONFIANZA_DETECCION = 0.45     # para encontrar una mano nueva (palma)
