@@ -269,7 +269,9 @@ class Escena:
                   20, 48, 16, COL_TEXTO)
 
         if ver_info:
-            T.dibujar(b, f"dibujo {info['fps_render']:.0f} fps  ·  detección {info['fps_det']:.0f} fps "
+            exp = info.get("exposicion")
+            T.dibujar(b, f"dibujo {info['fps_render']:.0f} fps  ·  cámara {info.get('fps_cam', 0):.0f} fps "
+                         f"(exp. {'auto' if exp is None else f'{exp:+.0f}'})  ·  detección {info['fps_det']:.0f} fps "
                          f"({info['lat_ms']:.0f} ms)  ·  giro {estado.omega:+.2f} rad/s  ·  swipe: {estado.swipe}",
                       20, 74, 13, COL_TENUE)
             y = 94
@@ -283,7 +285,7 @@ class Escena:
                           20, y, 13, COL_IZQ if v.rol == "izq" else COL_DER)
                 y += 19
             T.dibujar(b, "Espacio activar/pausar · R reiniciar · I intercambiar manos · V cámara · "
-                         "H info · F pantalla completa · Q salir", self.w - 16, 22, 13, COL_TENUE, ancla="d")
+                         "[ ] exposición · H info · F pantalla completa · Q salir", self.w - 16, 22, 13, COL_TENUE, ancla="d")
 
         if estado.activo:
             msg = "Izquierda: cierra el puño y sube o baja = zoom     ·     Derecha: swipe = girar, puño = agarrar     ·     OK = pausa"

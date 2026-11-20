@@ -65,12 +65,33 @@ def _puntos_pose(norm, world, ancho, alto):
     return p
 
 
+def _dist_segmento(p, a, b):
+    """Distancia del punto p al segmento a-b (2D o 3D)."""
+    ab = b - a
+    k = float(np.clip(np.dot(p - a, ab) / max(float(np.dot(ab, ab)), 1e-12), 0.0, 1.0))
+    return float(np.linalg.norm(p - (a + k * ab)))
+
+
+def _ratio_aro(p):
+    """Que tan cerrado esta el aro pulgar-indice, relativo al tamano de la palma.
+    No solo punta con punta: vale que la punta del pulgar toque la ultima falange
+    del indice (o al reves), que es como la gente hace el OK de verdad."""
+    palma = max(float(np.linalg.norm(p[9] - p[0])), 1e-9)
+    d = min(float(np.linalg.norm(p[4] - p[8])),
+            _dist_segmento(p[4], p[7], p[8]),
+            _dist_segmento(p[8], p[3], p[4]))
+    return d / palma
+
+
 def medir_pose(norm, world, ancho=640, alto=480):
     """-> (ratio_puno, ratio_ok, dedos_estirados)
 
     ratio_puno: punta-muneca / nudillo-muneca, promedio de 4 dedos (~2 abierta, ~1 puno)
-    ratio_ok:   distancia pulgar-indice / tamano de la palma (~0.1 tocandose)
-    dedos_estirados: cuantos de medio, anular y menique estan rectos (0..3)
+    ratio_ok:   separacion del aro pulgar-indice / tamano de la palma (~0.1 tocandose).
+                Se mide en 3D y en la imagen y se toma el mejor: la profundidad de
+                MediaPipe es ruidosa justo cuando los dedos se tapan entre si.
+    dedos_estirados: cuantos de medio, anular y menique estan estirados (0..3);
+                basta con que esten rectos O lejos de la muneca (dedos relajados cuentan)
     """
     p = _puntos_pose(norm, world, ancho, alto)
     muneca = p[0]
@@ -78,13 +99,18 @@ def medir_pose(norm, world, ancho=640, alto=480):
     for mcp, _, _, punta in DEDOS:
         base = max(np.linalg.norm(p[mcp] - muneca), 1e-9)
         rs.append(np.linalg.norm(p[punta] - muneca) / base)
-    palma = max(np.linalg.norm(p[9] - muneca), 1e-9)
-    ok = np.linalg.norm(p[4] - p[8]) / palma
+
+    ok = _ratio_aro(p)
+    if world is not None and norm is not None:
+        p2 = np.asarray(norm, dtype=np.float64)[:, :2] * np.array([ancho, alto], dtype=np.float64)
+        ok = min(ok, C.OK_PESO_2D * _ratio_aro(p2))
+
     estirados = 0
-    for a, b, c, d in DEDOS[1:]:
+    for (a, b, c, d), r in zip(DEDOS[1:], rs[1:]):
         largo = (np.linalg.norm(p[b] - p[a]) + np.linalg.norm(p[c] - p[b])
                  + np.linalg.norm(p[d] - p[c]))
-        if np.linalg.norm(p[d] - p[a]) / max(largo, 1e-9) > C.OK_RECTITUD:
+        recto = np.linalg.norm(p[d] - p[a]) / max(largo, 1e-9) > C.OK_RECTITUD
+        if recto or r > C.OK_EXTENSION:
             estirados += 1
     return float(np.mean(rs)), float(ok), estirados
 
@@ -147,10 +173,15 @@ class Mano:
         self.ratio_ok = float(self.f_ok(ro, t))
         self.estirados = est
         self._maquina_puno(t)
+        # el OK solo cuenta con la mano casi quieta: un swipe de lado (pulgar delante
+        # del indice en la imagen) o una mano que pasa no lo disparan
+        quieta = float(np.linalg.norm(self.vel)) < C.OK_V_MAX
         if self.ok:
-            self.ok = self.ratio_ok < C.OK_OFF and est >= C.OK_DEDOS_MIN - 1
+            self.ok = (self.ratio_ok < C.OK_OFF and est >= C.OK_DEDOS_MIN - 1
+                       and not self.puno and quieta)
         else:
-            self.ok = self.ratio_ok < C.OK_ON and est >= C.OK_DEDOS_MIN and not self.puno
+            self.ok = (self.ratio_ok < C.OK_ON and est >= C.OK_DEDOS_MIN
+                       and not self.puno and quieta)
 
         if etiqueta in ("Left", "Right"):
             obs = score if etiqueta == "Left" else 1.0 - score

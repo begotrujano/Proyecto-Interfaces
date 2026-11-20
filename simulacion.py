@@ -1,7 +1,9 @@
 """Manos sinteticas en 3D (para probar todo sin camara).
 
 mano(pose, x, y, lado) -> (norm(21,2), world(21,3), etiqueta, score), igual que MediaPipe.
-Poses: 'abierta', 'puno', 'ok', 'relajada'.
+Poses: 'abierta', 'puno', 'ok', 'relajada' y 'ok_real' (OK como lo hace la gente:
+el pulgar toca la ultima falange del indice, los otros dedos algo doblados y la
+profundidad de MediaPipe equivocada por 3.5 cm).
 """
 
 import math
@@ -12,7 +14,8 @@ import numpy as np
 MCP = {5: (0.030, -0.085), 9: (0.008, -0.090), 13: (-0.012, -0.085), 17: (-0.030, -0.075)}
 FALANGES = {5: (0.040, 0.025, 0.022), 9: (0.045, 0.028, 0.024),
             13: (0.042, 0.026, 0.022), 17: (0.032, 0.020, 0.020)}
-CURVA = {"abierta": (0, 0, 0, 0), "puno": (1, 1, 1, 1), "ok": (0.55, 0, 0, 0), "relajada": (0.35,) * 4}
+CURVA = {"abierta": (0, 0, 0, 0), "puno": (1, 1, 1, 1), "ok": (0.55, 0, 0, 0), "relajada": (0.35,) * 4,
+         "ok_real": (0.6, 0.3, 0.35, 0.4)}
 ESCALA_IMAGEN = 1.4          # metros -> coordenadas 0..1 (mano de ~13 % del alto)
 
 
@@ -33,6 +36,8 @@ def mano_world(pose):
         w[4] = (0.000, -0.060, -0.030)
     elif pose == "ok":
         w[4] = w[8] + np.array([0.004, 0.0, 0.0])
+    elif pose == "ok_real":
+        w[4] = 0.5 * (w[7] + w[8]) + np.array([0.006, 0.0, 0.035])
     else:
         w[4] = (0.050, -0.065, -0.010)
     return w

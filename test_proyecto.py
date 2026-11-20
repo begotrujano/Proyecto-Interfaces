@@ -119,6 +119,34 @@ def test_ok_activa_y_pausa():
     assert not s.ctl.activo
 
 
+def test_ok_realista():
+    """OK como lo hace la gente (pulgar en la falange, dedos relajados, profundidad
+    equivocada), con temblor y con cuadros donde MediaPipe lo pierde: debe activar."""
+    _, ok, dedos = medir_pose(*mano("ok_real", 0.5, 0.5)[:2])
+    print(f"  ok_real: aro {ok:.2f} (<{C.OK_ON})  dedos {dedos}/3")
+    assert ok < C.OK_ON and dedos >= C.OK_DEDOS_MIN
+    rng = np.random.default_rng(7)
+    s = Sim()
+    s.correr(lambda t: [DER("abierta")], 0.5)
+    cuadro = [0]
+
+    def g(t):
+        cuadro[0] += 1                      # 1 de cada 4 detecciones el OK "se rompe"
+        pose = "abierta" if cuadro[0] % 4 == 0 else "ok_real"
+        return [mano(pose, X_DER, Y0, "Right", ruido=0.002, rng=rng)]
+    s.correr(g, 0.8)
+    assert s.ctl.activo, "un OK realista e intermitente debe activar"
+
+
+def test_ok_en_movimiento_no_activa():
+    s = Sim()
+    s.correr(lambda t: [DER("abierta", x=0.3)], 0.5)
+    for _ in range(3):                      # aro cerrado pero la mano barriendo de lado a lado
+        s.correr(lambda t: [DER("ok", x=lerp(0.3, 0.8, t / 0.4))], 0.4)
+        s.correr(lambda t: [DER("ok", x=lerp(0.8, 0.3, t / 0.4))], 0.4)
+    assert not s.ctl.activo, "un OK en pleno movimiento no debe activar"
+
+
 def test_pausa_no_mueve():
     s = Sim()
     s.correr(lambda t: [IZQ("puno", y=lerp(0.6, 0.35, t / 0.6)), DER("puno", x=lerp(0.6, 0.8, t / 0.6))], 0.8)

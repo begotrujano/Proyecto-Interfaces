@@ -20,6 +20,7 @@ import os
 import sys
 import threading
 import time
+import zipfile
 from pathlib import Path
 
 os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")   # arranque rapido en Windows
@@ -51,7 +52,22 @@ def abrir_camara(indice, dshow):
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, C.CAM_ALTO)
     cap.set(cv2.CAP_PROP_FPS, C.CAM_FPS)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    if C.CAM_EXPOSICION is not None:
+        fijar_exposicion(cap, C.CAM_EXPOSICION)
     return cap
+
+
+def fijar_exposicion(cap, valor):
+    """valor=None -> automatica. Si no, exposicion manual (DirectShow: log2 de segundos,
+    -6 = 1/64 s, -7 = 1/128 s). Menos exposicion = menos barrido al mover rapido la mano
+    = MediaPipe no la pierde (pero la imagen se oscurece: necesitas buena luz)."""
+    if valor is None:
+        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)      # DirectShow
+        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)         # MSMF / V4L2
+        return
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+    cap.set(cv2.CAP_PROP_EXPOSURE, float(valor))
 
 
 def buscar_modelo():
@@ -63,26 +79,40 @@ def buscar_modelo():
 
 
 class DetectorMediaPipe:
-    """detectar(frame_bgr, t_ms) -> [(norm(21,2), world(21,3)|None, 'Left'|'Right'|None, score)]"""
+    """detectar(frame_bgr, t_ms) -> [(norm(21,2), world(21,3)|None, 'Left'|'Right'|None, score)]
+
+    Por defecto usa solo el HandLandmarker que viene DENTRO de gesture_recognizer.task
+    (el .task es un zip): da los mismos puntos sin pagar el clasificador de gestos,
+    que no usamos. Asi cada deteccion tarda menos y se pierden menos cuadros."""
 
     def __init__(self, ruta_modelo):
         import mediapipe as mp
         self.mp = mp
-        opciones = mp.tasks.vision.GestureRecognizerOptions(
-            # el modelo se pasa en memoria: evita problemas con rutas con acentos o espacios
-            base_options=mp.tasks.BaseOptions(model_asset_buffer=Path(ruta_modelo).read_bytes()),
-            running_mode=mp.tasks.vision.RunningMode.VIDEO,
+        vision = mp.tasks.vision
+        comunes = dict(
+            running_mode=vision.RunningMode.VIDEO,
             num_hands=C.NUM_MANOS,
-            min_hand_detection_confidence=C.CONFIANZA_MIN,
-            min_hand_presence_confidence=C.CONFIANZA_MIN,
-            min_tracking_confidence=C.CONFIANZA_MIN,
+            min_hand_detection_confidence=C.CONFIANZA_DETECCION,
+            min_hand_presence_confidence=C.CONFIANZA_PRESENCIA,
+            min_tracking_confidence=C.CONFIANZA_RASTREO,
         )
-        self.reconocedor = mp.tasks.vision.GestureRecognizer.create_from_options(opciones)
+        # los modelos se pasan en memoria: evita problemas con rutas con acentos o espacios
+        landmarker = extraer_landmarker(ruta_modelo) if C.SOLO_LANDMARKER else None
+        if landmarker is not None:
+            self.tipo = "HandLandmarker"
+            self.modelo = vision.HandLandmarker.create_from_options(vision.HandLandmarkerOptions(
+                base_options=mp.tasks.BaseOptions(model_asset_buffer=landmarker), **comunes))
+            self._correr = self.modelo.detect_for_video
+        else:
+            self.tipo = "GestureRecognizer"
+            self.modelo = vision.GestureRecognizer.create_from_options(vision.GestureRecognizerOptions(
+                base_options=mp.tasks.BaseOptions(model_asset_buffer=Path(ruta_modelo).read_bytes()),
+                **comunes))
+            self._correr = self.modelo.recognize_for_video
 
     def detectar(self, frame_bgr, t_ms):
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        res = self.reconocedor.recognize_for_video(
-            self.mp.Image(image_format=self.mp.ImageFormat.SRGB, data=rgb), t_ms)
+        res = self._correr(self.mp.Image(image_format=self.mp.ImageFormat.SRGB, data=rgb), t_ms)
         mundo = getattr(res, "hand_world_landmarks", None) or []
         lados = getattr(res, "handedness", None) or []
         salida = []
@@ -97,7 +127,16 @@ class DetectorMediaPipe:
         return salida
 
     def cerrar(self):
-        self.reconocedor.close()
+        self.modelo.close()
+
+
+def extraer_landmarker(ruta_modelo):
+    """Saca hand_landmarker.task del bundle del gesture recognizer (o None si no esta)."""
+    try:
+        with zipfile.ZipFile(ruta_modelo) as z:
+            return z.read("hand_landmarker.task")
+    except (zipfile.BadZipFile, KeyError, OSError):
+        return None
 
 
 # ----------------------------------------------------------------------
@@ -106,16 +145,37 @@ class DetectorMediaPipe:
 class Captura(threading.Thread):
     """Lee cuadros sin parar y conserva solo el ultimo: cero cola = cero retraso acumulado."""
 
-    def __init__(self, lector, liberar=lambda: None, espejo=True):
+    def __init__(self, lector, liberar=lambda: None, espejo=True, ajustar=None):
         super().__init__(daemon=True, name="captura")
         self.lector, self.liberar, self.espejo = lector, liberar, espejo
+        self.ajustar = ajustar            # funcion(valor) que cambia la exposicion de la camara
+        self.exposicion = C.CAM_EXPOSICION
+        self._pendiente = False
+        self.fps = 0.0
         self.cond = threading.Condition()
         self.frame, self.ts, self.seq = None, 0.0, 0
         self.activo = True
         self.fallos = 0
 
+    def cambiar_exposicion(self, paso):
+        """paso=None -> automatica; +1/-1 -> mas/menos tiempo de exposicion.
+        Se aplica desde el propio hilo de captura (la camara no se toca desde dos hilos)."""
+        if self.ajustar is None:
+            return
+        if paso is None:
+            self.exposicion = None
+        elif self.exposicion is None:
+            self.exposicion = C.CAM_EXPOSICION_MANUAL
+        else:
+            self.exposicion = min(max(self.exposicion + paso, -13), 0)
+        self._pendiente = True
+
     def run(self):
+        t_prev = None
         while self.activo:
+            if self._pendiente:
+                self._pendiente = False
+                self.ajustar(self.exposicion)
             ok, f = self.lector()
             if not ok or f is None:
                 self.fallos += 1
@@ -123,6 +183,9 @@ class Captura(threading.Thread):
                 continue
             self.fallos = 0
             ts = time.perf_counter()
+            if t_prev is not None:
+                self.fps = 0.9 * self.fps + 0.1 / max(ts - t_prev, 1e-3)
+            t_prev = ts
             if self.espejo:
                 f = cv2.flip(f, 1)        # espejo: tu mano derecha aparece a la derecha
             with self.cond:
@@ -228,7 +291,9 @@ class Aplicacion:
         self.control.avanzar(t)
         est = self.control.instantanea(t)
         self.suave.paso(est.log_escala, est.giro, dt)
-        info = {"fps_render": self.fps_render, "fps_det": self.deteccion.fps, "lat_ms": self.deteccion.lat_ms}
+        info = {"fps_render": self.fps_render, "fps_det": self.deteccion.fps, "lat_ms": self.deteccion.lat_ms,
+                "fps_cam": getattr(self.captura, "fps", 0.0),
+                "exposicion": getattr(self.captura, "exposicion", None)}
         return self.escena.componer(self.suave.log_escala, self.suave.giro, est, info,
                                     self.captura.frame, self.ver_camara, self.ver_info, t)
 
@@ -244,6 +309,12 @@ class Aplicacion:
                 self.control.reiniciar()
         elif k == ord("i"):
             self.control.intercambiar_manos()
+        elif k in (ord("["), ord("]"), ord("e")) and hasattr(self.captura, "cambiar_exposicion"):
+            self.captura.cambiar_exposicion(None if k == ord("e") else (-1 if k == ord("[") else 1))
+            exp = self.captura.exposicion
+            texto = ("Exposición automática" if exp is None
+                     else f"Exposición {exp:+.0f}  (1/{2 ** -exp:.0f} s)")
+            self.control.avisar(texto)
 
     def correr(self, pantalla_completa=False):
         cv2.namedWindow(TITULO, cv2.WINDOW_NORMAL)
@@ -290,10 +361,12 @@ def main():
     if cap is None:
         print("No se pudo abrir la camara. Prueba --camara 1, o cierra otras apps que la usen.")
         return 1
+    detector = DetectorMediaPipe(ruta)
     print(f"Camara: {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))} "
-          f"@ {cap.get(cv2.CAP_PROP_FPS):.0f} FPS (pedido)   Modelo: {ruta.name}")
+          f"@ {cap.get(cv2.CAP_PROP_FPS):.0f} FPS (pedido)   Modelo: {ruta.name} ({detector.tipo})")
     print("Cargando la Tierra...")
-    app = Aplicacion(Captura(cap.read, cap.release), DetectorMediaPipe(ruta))
+    captura = Captura(cap.read, cap.release, ajustar=lambda v: fijar_exposicion(cap, v))
+    app = Aplicacion(captura, detector)
     print(f"Textura: {app.escena.tierra.origen}")
     app.iniciar()
     try:

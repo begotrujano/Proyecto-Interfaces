@@ -80,6 +80,11 @@ class Control:
             self._soltar(0.0)
             self._avisar("Manos intercambiadas", self._t_det or 0.0)
 
+    def avisar(self, texto):
+        """Aviso en pantalla desde otro hilo (p. ej. al cambiar la exposicion con el teclado)."""
+        with self.lock:
+            self._avisar(texto, self._t_det or 0.0)
+
     def radio_px(self):
         return self.radio_base * math.exp(self.log_escala)
 
@@ -151,14 +156,14 @@ class Control:
                 if st["desde"] is None and not st["bloq"]:
                     st["desde"] = t
             else:
-                if st["desde"] is not None and t - st["ult"] > 0.12:
+                if st["desde"] is not None and t - st["ult"] > C.OK_TOLERANCIA:
                     st["desde"] = None
-                if t - st["ult"] > 0.25:
+                if t - st["ult"] > max(0.25, C.OK_TOLERANCIA + 0.05):
                     st["bloq"] = False      # hay que deshacer el OK antes de volver a usarlo
             if st["desde"] is not None:
                 p = min((t - st["desde"]) / C.OK_SOSTENER, 1.0)
                 progreso[m.id] = p
-                if p >= 1.0:
+                if p >= 1.0 and m.ok:           # se completa solo con el OK presente
                     st["desde"], st["bloq"] = None, True
                     if not self.activo:
                         self._activar(True, t)

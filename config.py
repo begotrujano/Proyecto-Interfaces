@@ -1,7 +1,8 @@
 """Todos los parametros ajustables, en un solo lugar.
 
 Guia rapida para afinar (mira los numeros de depuracion en pantalla, tecla H):
-  - El OK no activa:                 sube OK_ON (0.33 -> 0.40)
+  - El OK no activa:                 mira "ok" y "dedos" (tecla H); sube OK_ON (0.40 -> 0.48)
+                                     o baja OK_DEDOS_MIN a 1
   - El OK se activa solo:            baja OK_ON o sube OK_SOSTENER
   - El puno no "agarra":             sube PUNO_ON (1.25 -> 1.35)
   - Suelta el puno sin querer:       sube PUNO_OFF
@@ -29,13 +30,23 @@ CAM_ANCHO, CAM_ALTO, CAM_FPS = 640, 480, 60
 # Zona comoda: el 80 % central de la camara se estira a toda la pantalla,
 # asi llegas a las orillas sin sacar la mano del cuadro.
 MARGEN_CAMARA = 0.10
+# Exposicion. None = automatica. Con poca luz la camara alarga la exposicion: la mano
+# sale barrida al moverla rapido, MediaPipe la pierde y la camara baja a 15-30 FPS.
+# Un valor manual corto (DirectShow: -6 = 1/64 s, -7 = 1/128 s) congela mejor la mano,
+# pero oscurece la imagen. Pruebalo en vivo con [ y ] (E = volver a automatica)
+# y mira "cámara N fps" en la info (tecla H).
+CAM_EXPOSICION = None
+CAM_EXPOSICION_MANUAL = -6     # desde donde empiezan [ y ] si estaba en automatica
 
 # ----------------------------------------------------------------------
 # Deteccion (MediaPipe)
 # ----------------------------------------------------------------------
 MODELO = "gesture_recognizer.task"
 NUM_MANOS = 2
-CONFIANZA_MIN = 0.45
+SOLO_LANDMARKER = True         # solo el detector de puntos (mas rapido); False = GestureRecognizer completo
+CONFIANZA_DETECCION = 0.45     # para encontrar una mano nueva (palma)
+CONFIANZA_PRESENCIA = 0.40     # para seguir creyendo que hay mano (mas bajo = la pierde menos)
+CONFIANZA_RASTREO = 0.40       # para seguirla desde el cuadro anterior sin volver a buscarla
 
 # Filtro One Euro sobre los puntos de la mano (coordenadas 0..1)
 OE_MINCUT = 0.6       # menos = mas estable con la mano quieta
@@ -59,12 +70,18 @@ PUNO_OFF = 1.55
 PUNO_DEBOUNCE_ON = 0.05
 PUNO_DEBOUNCE_OFF = 0.08
 
-# OK (pulgar con indice + al menos 2 de los otros 3 dedos estirados)
-OK_ON = 0.33                   # distancia pulgar-indice / tamano de la palma
-OK_OFF = 0.48
-OK_RECTITUD = 0.78             # que tan recto debe estar un dedo para contar como estirado
+# OK (aro pulgar-indice + al menos 2 de los otros 3 dedos estirados)
+#   El aro se mide como la distancia de la punta del pulgar a la ultima falange del
+#   indice (y viceversa), en 3D y en la imagen; se usa la menor.
+OK_ON = 0.40                   # separacion del aro / tamano de la palma para empezar el OK
+OK_OFF = 0.58                  # ...y para soltarlo (histeresis)
+OK_PESO_2D = 1.2               # castigo a la medida en la imagen (>1 = confia mas en la 3D)
+OK_RECTITUD = 0.72             # un dedo cuenta como estirado si esta asi de recto...
+OK_EXTENSION = 1.55            # ...o si su punta esta asi de lejos de la muneca (relajado)
 OK_DEDOS_MIN = 2
+OK_V_MAX = 0.8                 # la mano debe estar casi quieta para empezar el OK (anchos de camara/s)
 OK_SOSTENER = 0.30             # s que hay que sostener el OK (se ve un anillo de progreso)
+OK_TOLERANCIA = 0.20           # s que puede "parpadear" el OK sin perder el progreso
 OK_TAMBIEN_PAUSA = True        # hacer OK otra vez pausa el control
 
 # ----------------------------------------------------------------------
