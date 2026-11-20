@@ -1,0 +1,7 @@
+﻿# Entorno virtual y cache de Python
+.venv/
+__pycache__/
+*.pyc
+
+# Configuracion local del editor
+.vscode/

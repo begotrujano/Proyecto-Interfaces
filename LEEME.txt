@@ -1,0 +1,54 @@
+UNIVERSO EN TUS MANOS - prototipo 2 (Tierra tipo globo terraqueo)
+==================================================================
+
+COMO EJECUTARLO (Windows, desde esta carpeta)
+  Opcion rapida, con el entorno que ya tienes en imAgen:
+      "..\imAgen\.venv\Scripts\python.exe" main.py
+  Opcion limpia, con su propio entorno:
+      py -m venv .venv
+      .venv\Scripts\pip install -r requirements.txt
+      .venv\Scripts\python.exe main.py
+  Opciones:  --camara 1   --dshow   --pantalla-completa
+
+COMO SE USA
+  1. ACTIVAR: haz el signo de OK con cualquier mano y sostenlo un instante.
+     Veras un anillo verde que se llena; al completarse dice "Control activado".
+     Solo hace falta una vez. (Respaldo: barra espaciadora.)
+  2. ZOOM - mano IZQUIERDA (aro naranja):
+     cierra el puno y sube = acercar, baja = alejar. Abre la mano para soltar
+     y reacomodarla (como un trinquete). La barra de la izquierda muestra el zoom.
+  3. GIRO - mano DERECHA (aro azul), como un globo terraqueo:
+     - swipe horizontal con la mano abierta: le da vuelo. Cada swipe suma
+       velocidad; un swipe en contra la frena. El regreso de la mano se ignora.
+     - puno: la agarras (se detiene) y la arrastras; si abres la mano mientras
+       la mueves, conserva el impulso.
+  4. PAUSA: OK otra vez, barra espaciadora, o quitar las manos 6 segundos.
+
+  Si tus manos salen al reves (la derecha hace zoom), presiona I.
+
+TECLAS
+  Espacio activar/pausar   R reiniciar   I intercambiar manos   V camara
+  H informacion de depuracion   F pantalla completa   Q o Esc salir
+
+SI ALGO NO SE SIENTE BIEN -> config.py (tiene la guia al inicio)
+  Con la tecla H ves en vivo los numeros de cada mano:
+    puno  < 1.30 = puno cerrado      ok < 0.33 y dedos >= 2 = OK
+  - El OK no activa:          sube OK_ON (0.33 -> 0.40)
+  - El puno no agarra:        sube PUNO_ON (1.30 -> 1.40)
+  - El swipe no gira:         baja SWIPE_V_ON (1.5 -> 1.2)
+  - Gira sin querer:          sube SWIPE_V_ON
+  - Zoom muy rapido/lento:    GANANCIA_ZOOM
+
+ARCHIVOS
+  main.py          ventana y los 3 hilos (camara, deteccion, dibujo)
+  manos.py         filtro anti-temblor, seguimiento, rol izquierda/derecha, puno y OK
+  control.py       activacion con OK, zoom, giro con swipe e inercia
+  tierra.py        esfera 3D con textura que gira sobre su eje
+  render.py        estrellas, guias de las manos, textos, camara en miniatura
+  config.py        todos los parametros
+  simulacion.py    manos 3D sinteticas para probar sin camara
+  test_proyecto.py 17 pruebas sin camara:  python test_proyecto.py
+
+CREDITOS
+  Textura de la Tierra: NASA Blue Marble Next Generation (dominio publico),
+  tomada del paquete basemap-data.
