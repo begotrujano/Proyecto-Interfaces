@@ -160,6 +160,7 @@ class Escena:
         self.astros = {}
         self.vista_sistema = VistaSistema(self)
         self._modo, self._fundido = "astro", None
+        self.resaltado = None                              # (x, y, radio, nombre) del astro bajo el cursor del raton
         threading.Thread(target=self._precalentar, daemon=True, name="precalentar").start()
 
     def _precalentar(self):
@@ -188,6 +189,13 @@ class Escena:
             self._espacio(log_escala, giro, inclinacion, fecha or fecha_actual(), foco, viaje, t)
         if seleccion is not None:
             self._seleccion(seleccion)
+        if self.resaltado is not None and modo == self._modo:
+            x, y, r, nombre = self.resaltado
+            cv2.circle(self.buf, _p(x, y), int((max(r, 12.0) + 8) * 16), (255, 255, 255), 1, cv2.LINE_AA, 4)
+            accion = "volver" if (modo == "sistema" and nombre == foco) else "ir a"
+            self.texto.dibujar(self.buf, f"clic: {accion} {NOMBRES.get(nombre, nombre)}" if accion == "ir a"
+                               else f"clic: volver a {NOMBRES.get(nombre, nombre)}",
+                               x, y + max(r, 12.0) + 16, 13, COL_TEXTO, False, "c")
         if estado.activo:
             self._barra_zoom(log_escala, estado.zoom_agarrado)
         self._manos(estado)
@@ -444,6 +452,8 @@ class Escena:
         else:
             msg = "Haz el signo de OK con cualquier mano para activar el control"
         T.dibujar(b, msg, self.w / 2, self.h - 40, 17 if not estado.activo else 15, COL_TEXTO, ancla="c")
+        T.dibujar(b, "Ratón / touchpad: arrastrar = girar e inclinar  ·  rueda o dos dedos = zoom  ·  clic en un astro = viajar",
+                  self.w / 2, self.h - 66, 13, COL_TENUE, ancla="c")
 
     def _avisos(self, estado, t):
         for i, (texto, t0) in enumerate(estado.avisos[-1:]):

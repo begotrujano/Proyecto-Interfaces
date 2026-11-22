@@ -689,6 +689,95 @@ def test_cambio_de_vista_en_la_aplicacion():
     assert app.foco == "tierra" and app.modo == "astro"
 
 
+def test_raton_control():
+    """Raton/touchpad: rueda = zoom logaritmico, arrastrar = la superficie sigue al cursor, inercia al soltar."""
+    ctl = Control()
+    e0 = ctl.log_escala
+    ctl.zoom_raton(+3)
+    assert abs(ctl.log_escala - e0 - 3 * C.RATON_ZOOM_PASO) < 1e-9
+    ctl.zoom_raton(-100)
+    assert abs(ctl.log_escala - math.log(C.ESCALA_MIN)) < 1e-9          # tope
+    ctl.zoom_raton(+100)
+    assert abs(ctl.log_escala - math.log(C.ESCALA_MAX)) < 1e-9
+    ctl = Control()
+    g0, r = ctl.giro, ctl._radio_giro()
+    ctl.raton_agarrar()
+    ctl.raton_arrastrar(60.0, -30.0, 1 / 60)                              # cursor a la derecha y arriba
+    assert abs(ctl.giro - g0 - 60.0 / r) < 1e-9                          # la superficie sigue al cursor (como el puno)
+    assert abs(ctl.inclinacion - 30.0 / r) < 1e-9
+    ctl.avanzar(1.0)
+    ctl.avanzar(1.5)
+    assert abs(ctl.giro - g0 - 60.0 / r) < 1e-9, "arrastrando no hay inercia encima"
+    ctl.raton_soltar()
+    ctl.avanzar(1.6)
+    assert ctl.omega > 0.1 and ctl.giro > g0 + 60.0 / r                  # conserva el impulso
+    ctl2 = Control()
+    ctl2.raton_agarrar()
+    ctl2.raton_arrastrar(50, 0, 1 / 60)
+    ctl2.raton_soltar(quieto=True)
+    assert ctl2.omega == 0.0                                              # si estaba quieto, se queda
+    ctl2.raton_agarrar()
+    for _ in range(30):
+        ctl2.raton_arrastrar(0, -400, 1 / 60)
+    assert abs(ctl2.inclinacion - math.radians(C.INCLINACION_MAX)) < 1e-9  # tope en el polo
+    # funciona aunque el control por manos este en pausa
+    assert not ctl2.activo
+
+
+def test_raton_en_la_aplicacion():
+    """Clic sobre un astro viaja a el (tambien desde la vista del sistema), rueda = zoom, y un cambio de vista
+    ocurrido DENTRO de paso_render ya no deja el suavizado vacio (era el crash del HUD)."""
+    import cv2
+    from main import Aplicacion, Captura
+    app = Aplicacion(Captura(FuenteFalsa().leer), DetectorGuion())
+    time.sleep(1.0)
+    app.paso_render()
+    app.alternar_sistema()
+    app.paso_render()
+    objetivos = app.escena.astros["objetivos"]
+    xm, ym, _ = objetivos["marte"]
+    # arrastrar gira la vista; la rueda cambia la escala (px por UA)
+    # OpenCV llama al callback con 5 argumentos (evento, x, y, flags, param)
+    app.raton(cv2.EVENT_LBUTTONDOWN, 600, 300, 0, None)
+    g0 = app.control.giro
+    app.raton(cv2.EVENT_MOUSEMOVE, 680, 300, cv2.EVENT_FLAG_LBUTTON)
+    app.raton(cv2.EVENT_LBUTTONUP, 680, 300, 0)
+    assert abs(app.control.giro - g0) > 0.1 and app.viaje is None
+    e0 = app.control.log_escala
+    app.raton(cv2.EVENT_MOUSEWHEEL, 640, 360, 120 << 16)
+    assert app.control.log_escala > e0
+    app.paso_render()
+    xm, ym, _ = app.escena.astros["objetivos"]["marte"]
+    app.paso_render()
+    app.raton(cv2.EVENT_MOUSEMOVE, xm, ym, 0)
+    app.paso_render()
+    assert app.escena.resaltado is not None and app.escena.resaltado[3] == "marte"
+    xm, ym, _ = app.escena.astros["objetivos"]["marte"]
+    app.raton(cv2.EVENT_LBUTTONDOWN, xm, ym, 0)
+    app.raton(cv2.EVENT_LBUTTONUP, xm, ym, 0)                            # clic sobre Marte
+    assert app.viaje is not None and app.viaje.nombre == "marte" and app.modo == "astro"
+    app.paso_render()
+    # regresion: viajar desde la vista del sistema DENTRO de paso_render (lo hace la palma sobre un astro)
+    app2 = Aplicacion(Captura(FuenteFalsa().leer), DetectorGuion())
+    app2.paso_render()
+    app2.alternar_sistema()
+    app2.paso_render()
+    app2._elegir_astro = lambda est, t: (app2._viajar("marte", t), None)[1]
+    app2.paso_render()
+    assert app2.suave.log_escala is not None and app2.viaje is not None
+    app2._elegir_astro = lambda est, t: (app2.alternar_sistema(t), None)[1]    # y salir con la palma sobre el astro actual
+    app2.viaje = None
+    app2.modo = "sistema"
+    app2._guardado = (0.0, 1.0, 0.0)
+    app2.paso_render()
+    assert app2.modo == "astro" and app2.suave.log_escala is not None
+    # clic en el vacio no hace nada
+    app.viaje = None
+    app.modo = "astro"
+    app.clic(5, 5)
+    assert app.viaje is None
+
+
 def test_render():
     import cv2
     from universo.control import Estado, ManoVista

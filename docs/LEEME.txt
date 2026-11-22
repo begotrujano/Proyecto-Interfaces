@@ -58,6 +58,10 @@ ARCHIVOS
   pruebas/test_proyecto.py   pruebas sin camara:  python pruebas\test_proyecto.py
   assets/  modelos/  docs/   textura de la Tierra, modelo de MediaPipe, documentacion
 
+RATON O TOUCHPAD (sin usar las manos)
+  Arrastrar con el boton izquierdo = girar e inclinar | rueda o dos dedos = zoom
+  Clic sobre un astro = viajar a el | en la vista del sistema, clic en el astro actual = volver
+
 MARTE, EL SOL Y EL SISTEMA SOLAR
   - En pausa, deja la palma sobre un astro (un punto, como Marte desde la Tierra) hasta
     que se llene el anillo: viajas a el. Con Marte y el Sol funcionan igual los gestos que

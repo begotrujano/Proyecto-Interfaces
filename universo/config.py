@@ -87,6 +87,16 @@ VIAJE_ARCO = 155.0                 # grados que rodeas el destino (el origen que
 VIAJE_GIRO = 0.25                  # fraccion del viaje para voltear hacia el destino            # nombre y distancia junto al Sol y la Luna
 
 # ----------------------------------------------------------------------
+# Raton / touchpad (alternativa a las manos; siempre activo, aunque el control este en pausa)
+#   arrastrar con el boton izquierdo = girar e inclinar | rueda (o dos dedos en el pad) = zoom
+#   clic sobre un astro = viajar a el (en la vista del sistema, sobre el astro actual = volver)
+# ----------------------------------------------------------------------
+RATON_ZOOM_PASO = 0.18             # cambio del logaritmo del zoom por cada "muesca" de la rueda
+RATON_CLIC_PX = 6.0                # movimiento maximo (px) para que un arrastre cuente como clic
+RATON_GANANCIA = 1.0               # 1 = la superficie sigue al cursor; >1 = gira mas rapido
+RATON_INERCIA = True               # al soltar el arrastre conserva el impulso (como el puno)
+
+# ----------------------------------------------------------------------
 # Camara
 # ----------------------------------------------------------------------
 CAM_INDICE = 0

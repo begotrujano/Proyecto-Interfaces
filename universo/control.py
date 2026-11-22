@@ -62,6 +62,7 @@ class Control:
         self.omega = 0.0
         self.inclinacion = 0.0             # rad; positivo = la superficie de enfrente sube (se ve el sur)
         self.omega_v = 0.0                 # rad/s de la inclinacion
+        self.raton_agarrado = False        # arrastrando con el raton: la inercia espera
         self.zoom_mano = None
         self._y_prev = None
         self.giro_mano = None
@@ -100,6 +101,42 @@ class Control:
         with self.lock:
             self._soltar(self._t_det or 0.0)
             self.log_escala = float(np.clip(log_escala, math.log(C.ESCALA_MIN), math.log(C.ESCALA_MAX)))
+
+    # ------------------------------------------------------------------
+    # Raton / touchpad (lo llama el hilo de dibujo)
+    # ------------------------------------------------------------------
+    def zoom_raton(self, pasos):
+        """Rueda del raton: pasos > 0 acerca, < 0 aleja (zoom logaritmico, igual que con la mano)."""
+        with self.lock:
+            self.log_escala = float(np.clip(self.log_escala + pasos * C.RATON_ZOOM_PASO,
+                                            math.log(C.ESCALA_MIN), math.log(C.ESCALA_MAX)))
+
+    def raton_agarrar(self):
+        """Empieza un arrastre: detiene el giro (como atrapar el globo)."""
+        with self.lock:
+            self.raton_agarrado = True
+            self.omega = self.omega_v = 0.0
+
+    def raton_arrastrar(self, dx, dy, dt):
+        """La superficie sigue al cursor: dx, dy en pixeles del lienzo; dt en segundos desde el ultimo movimiento."""
+        with self.lock:
+            r = self._radio_giro() / max(C.RATON_GANANCIA, 1e-3)
+            dg, di = dx / r, -dy / r                       # cursor arriba = la superficie sube = se ve el sur
+            self.giro += dg
+            lim = math.radians(C.INCLINACION_MAX)
+            nueva = float(np.clip(self.inclinacion + di, -lim, lim))
+            di = nueva - self.inclinacion
+            self.inclinacion = nueva
+            if dt > 1e-4:                                  # velocidad suavizada para la inercia al soltar
+                self.omega = 0.6 * self.omega + 0.4 * float(np.clip(dg / dt, -C.OMEGA_MAX, C.OMEGA_MAX))
+                self.omega_v = 0.6 * self.omega_v + 0.4 * float(np.clip(di / dt, -C.OMEGA_V_MAX, C.OMEGA_V_MAX))
+
+    def raton_soltar(self, quieto=False):
+        """Fin del arrastre. Con inercia conserva el impulso; si el cursor llevaba rato quieto, se detiene."""
+        with self.lock:
+            self.raton_agarrado = False
+            if quieto or not C.RATON_INERCIA:
+                self.omega = self.omega_v = 0.0
 
     def avisar(self, texto):
         """Aviso en pantalla desde otro hilo (p. ej. al cambiar la exposicion con el teclado)."""
@@ -330,7 +367,7 @@ class Control:
         with self.lock:
             dt = 0.0 if self._t_render is None else min(max(t - self._t_render, 0.0), 0.1)
             self._t_render = t
-            if self.giro_mano is not None:
+            if self.giro_mano is not None or self.raton_agarrado:
                 return
             self.giro += self.omega * dt
             self._inclinar(self.omega_v * dt)

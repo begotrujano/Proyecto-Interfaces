@@ -7,7 +7,7 @@ Proyecto de Interfaces Avanzadas (UV, 5.º semestre). Es un explorador educativo
 - `requirements.txt`: opencv-python (5.1), mediapipe (1.2.3), numpy (2.5), pillow (13).
 - Modelo `modelos/gesture_recognizer.task`. Se usan sus landmarks 2D/3D y la etiqueta de mano; las poses se calculan con geometría propia.
 - Ejecutar: `.venv\Scripts\python.exe main.py` (opciones: `--camara 1 --dshow --pantalla-completa`)
-- Pruebas sin cámara: `.venv\Scripts\python.exe pruebas\test_proyecto.py` (34 pruebas; deben pasar siempre. `test_integracion_hilos` exige >40 FPS y puede fallar si la laptop esta en ahorro de energia).
+- Pruebas sin cámara: `.venv\Scripts\python.exe pruebas\test_proyecto.py` (36 pruebas; deben pasar siempre. `test_integracion_hilos` exige >40 FPS y puede fallar si la laptop esta en ahorro de energia).
 
 ## Estructura de carpetas
 - `main.py` (entrada) · `requirements.txt` · `CLAUDE.md` (debe estar en la raíz: Claude Code solo lo lee ahí).
@@ -48,6 +48,9 @@ Proyecto de Interfaces Avanzadas (UV, 5.º semestre). Es un explorador educativo
 - El **Sol** y **Marte** usan también `Tierra`: el Sol con `emisivo=True` (brilla solo, oscurecimiento al limbo, halo cálido, `BRILLO_SOL`; su resplandor es un sprite de `cielo.py` dibujado detrás del disco); Marte sin atmósfera ni reflejo (`oceanos=False`). Las listas `TEXTURA_MARTE`/`TEXTURA_SOL` en `config.py` usan el primer archivo que exista; `DESFASE_TEXTURA_MARTE` corrige imágenes con la longitud 0 fuera del centro.
 - `universo/render.py`: el cielo y luego TODOS los astros (Sol incluido) de lejos a cerca, por profundidad; los astros muy lejanos son un punto; etiquetas con nombre y distancia desde el astro en foco; HUD con altitud de la cámara; cursores (naranja = zoom, azul = giro), barra de zoom, estado, avisos, info de depuración (tecla H) y miniatura de cámara. Textos con Pillow en caché, para que salgan los acentos.
 - `pruebas/simulacion.py`: manos 3D sintéticas en formato MediaPipe. `pruebas/test_proyecto.py`: pruebas unitarias e integración con hilos.
+
+## Ratón / touchpad (alternativa a las manos, siempre activo)
+- `Aplicacion.raton` (callback de OpenCV) + `Control.zoom_raton/raton_agarrar/raton_arrastrar/raton_soltar`: arrastrar con el botón izquierdo = girar e inclinar (la superficie sigue al cursor, con inercia al soltar), rueda o dos dedos del pad = zoom logarítmico, clic sobre un astro = viajar a él (en la vista del sistema, sobre el astro actual = volver). Al pasar el cursor sobre un astro se resalta con un anillo. Parámetros `RATON_*` en `config.py`. Funciona con el control de manos en pausa o activo.
 
 ## Teclas
 Espacio activar/pausar · **S sistema solar (entrar/salir)** · R reiniciar · I intercambiar manos · [ ] exposición (E = automática) · V cámara · H info · F pantalla completa · Q/Esc salir.

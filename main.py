@@ -267,6 +267,8 @@ class Aplicacion:
     def __init__(self, captura, detector, ancho=C.ANCHO, alto=C.ALTO):
         self.captura, self.detector = captura, detector
         self.escena = Escena(ancho, alto)
+        self._raton = {"x": -1.0, "y": -1.0, "abajo": False, "x0": 0.0, "y0": 0.0, "mov": 0.0, "t": 0.0}
+        self._dim = (ancho, alto)
         self.seguidor = SeguidorManos()
         self.control = Control(ancho, alto)
         self.deteccion = Deteccion(captura, detector, self.seguidor, self.control)
@@ -308,6 +310,12 @@ class Aplicacion:
         seleccion = self._elegir_astro(est, t)
         if self.viaje is not None and self.viaje.terminado(t):
             self._llegar()
+        if self.suave.log_escala is None:                 # cambio de vista dentro de este cuadro: toma el estado nuevo
+            est = self.control.instantanea(t)
+            self.suave.paso(est.log_escala, est.giro, est.inclinacion, dt)
+        r = self._raton
+        bajo = None if (r["abajo"] or r["x"] < 0 or self.viaje is not None) else self._astro_bajo(r["x"], r["y"])
+        self.escena.resaltado = (self.escena.astros["objetivos"][bajo] + (bajo,)) if bajo else None
         return self.escena.componer(self.suave.log_escala, self.suave.giro, est, info,
                                     self.captura.frame, self.ver_camara, self.ver_info, t,
                                     self.suave.inclinacion, foco=self.foco, viaje=self.viaje,
@@ -330,6 +338,64 @@ class Aplicacion:
             else:
                 self._viajar(elegido, t)
         return vista
+
+    # ------------------------------------------------------------------
+    # Raton / touchpad: arrastrar = girar, rueda = zoom, clic en un astro = viajar
+    # ------------------------------------------------------------------
+    def _astro_bajo(self, x, y):
+        """Astro bajo el cursor (el mas cercano), o None. Los pequenos tienen un area minima."""
+        mejor, dmin = None, 1e9
+        for nombre, (ox, oy, r) in self.escena.astros.get("objetivos", {}).items():
+            d = math.hypot(x - ox, y - oy)
+            if d <= max(r, C.SELECCION_RADIO_MIN) + 6.0 and d < dmin:
+                mejor, dmin = nombre, d
+        return mejor
+
+    def raton(self, evento, x, y, flags, param=None):
+        """Callback de OpenCV (corre en el hilo principal, dentro de waitKey)."""
+        r = self._raton
+        r["x"], r["y"] = float(x), float(y)
+        if evento == cv2.EVENT_MOUSEWHEEL:
+            try:
+                delta = cv2.getMouseWheelDelta(flags)
+            except Exception:
+                delta = 1 if flags > 0 else -1
+            if self.viaje is None and delta:
+                self.control.zoom_raton(1.0 if delta > 0 else -1.0)
+        elif evento == cv2.EVENT_LBUTTONDOWN and self.viaje is None:
+            r.update(abajo=True, x0=float(x), y0=float(y), mov=0.0, t=time.perf_counter())
+            self.control.raton_agarrar()
+        elif evento == cv2.EVENT_MOUSEMOVE and r["abajo"] and (flags & cv2.EVENT_FLAG_LBUTTON):
+            t = time.perf_counter()
+            dx, dy = x - r.get("px", r["x0"]), y - r.get("py", r["y0"])
+            r["mov"] = max(r["mov"], math.hypot(x - r["x0"], y - r["y0"]))
+            if r["mov"] > C.RATON_CLIC_PX:                 # ya no es un clic: es un arrastre
+                self.control.raton_arrastrar(dx, dy, t - r["t"])
+            r["t"] = t
+        elif evento == cv2.EVENT_LBUTTONUP and r["abajo"]:
+            r["abajo"] = False
+            quieto = time.perf_counter() - r["t"] > 0.12
+            self.control.raton_soltar(quieto or r["mov"] <= C.RATON_CLIC_PX)
+            if r["mov"] <= C.RATON_CLIC_PX:
+                self.clic(x, y)
+        r["px"], r["py"] = x, y
+        if evento == cv2.EVENT_LBUTTONDOWN:
+            r["px"], r["py"] = x, y
+
+    def clic(self, x, y):
+        """Clic sobre un astro: viajar a el. En la vista del sistema, sobre el astro actual = volver."""
+        if self.viaje is not None:
+            return
+        elegido = self._astro_bajo(x, y)
+        if elegido is None:
+            return
+        t = time.perf_counter()
+        if self.modo == "sistema" and elegido == self.foco:
+            self.alternar_sistema(t)
+        elif self.modo == "astro" and elegido == self.foco:
+            return
+        else:
+            self._viajar(elegido, t)
 
     def alternar_sistema(self, t=None):
         """Entra o sale de la vista del Sistema Solar completo (tecla S)."""
@@ -359,7 +425,7 @@ class Aplicacion:
             esc, giro, incl = self._guardado or (0.0, self.suave.giro, self.suave.inclinacion)
             self.modo = "astro"
             self.control.fijar_escala(0.0)
-            self.suave.reiniciar()
+            self.suave.log_escala, self.suave.giro, self.suave.inclinacion = 0.0, giro, incl
             esc_llegada = 0.0
         else:
             esc, giro, incl = self.suave.log_escala, self.suave.giro, self.suave.inclinacion
@@ -410,6 +476,7 @@ class Aplicacion:
     def correr(self, pantalla_completa=False):
         cv2.namedWindow(TITULO, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(TITULO, C.ANCHO, C.ALTO)
+        cv2.setMouseCallback(TITULO, self.raton)
         completa = pantalla_completa
         if completa:
             cv2.setWindowProperty(TITULO, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
