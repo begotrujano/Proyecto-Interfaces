@@ -619,6 +619,92 @@ def test_sol_y_marte_en_escena():
     cv2.imwrite(str(SALIDA / "render_tierra_con_marte.png"), cuadro("tierra", math.radians(99)))
 
 
+def test_mercurio_y_venus():
+    """Mercurio y Venus: efemerides validadas con sus transitos reales frente al Sol, elongacion maxima,
+    rotacion (la de Venus es retrograda) y que se dibujen como esferas iluminadas por el lado del Sol."""
+    import cv2
+    from universo import astros as A
+    from universo import sistema as S
+    from universo.render import Escena
+
+    def elongacion(n, jd):
+        p, s = S.geocentrica(n, jd), A.sol_posicion(jd)
+        return math.degrees(math.acos(np.clip(p @ s / np.linalg.norm(p) / np.linalg.norm(s), -1, 1)))
+
+    # transitos: el planeta pasa por delante del disco del Sol (radio 0.267 grados)
+    for n, fecha, real in (("mercurio", _fecha(2019, 11, 11, 15, 20), 0.021), ("venus", _fecha(2012, 6, 6, 1, 29), 0.154)):
+        e = elongacion(n, A.dia_juliano(fecha))
+        print(f"  transito de {n} {fecha.date()}: a {e:.3f} grados del centro del Sol (real {real})")
+        assert e < C.SOL_ANGULO_RADIO_GRADOS and abs(e - real) < 0.03
+    # el Sol de las efemerides de los planetas coincide con el del almanaque (precesion bien aplicada)
+    jd = A.dia_juliano(_fecha(2026, 11, 22, 0, 33))
+    v = S.ecliptica_a_tierra(jd) @ -S.heliocentrica("tierra", jd)
+    s = A.sol_posicion(jd)
+    assert math.degrees(math.acos(v @ s / np.linalg.norm(v) / np.linalg.norm(s))) < 0.02
+    # planetas interiores: nunca se alejan mucho del Sol (Mercurio ~28, Venus ~47 grados)
+    for n, tope in (("mercurio", 28.6), ("venus", 47.9)):
+        maximo = max(elongacion(n, jd + d) for d in range(0, 600, 2))
+        print(f"  elongacion maxima de {n}: {maximo:.1f} grados")
+        assert tope - 6.0 < maximo < tope
+    # rotacion: tras un dia sideral el meridiano 0 vuelve a apuntar igual; Venus gira al reves
+    inercial = lambda n, d: S.rotacion(n, d) @ A.ecuatorial_a_tierra(d)   # marco ecuatorial (no gira con la Tierra)
+    for n, periodo in (("mercurio", 58.6462), ("venus", 243.0185)):
+        R1, R2 = inercial(n, jd), inercial(n, jd + periodo)
+        giro = np.degrees(np.arccos(np.clip((np.trace(R1 @ R2.T) - 1) / 2, -1, 1)))
+        print(f"  {n} tras {periodo} dias: gira {giro:.3f} grados")
+        assert giro < 0.05
+    x0 = inercial("venus", jd).T @ np.array([1.0, 0.0, 0.0])          # meridiano 0 de Venus
+    x1 = inercial("venus", jd + 1.0).T @ np.array([1.0, 0.0, 0.0])
+    polo = inercial("venus", jd).T @ np.array([0.0, 0.0, 1.0])
+    assert np.cross(x0, x1) @ polo < 0                                # gira en sentido horario visto desde su polo norte
+    # en la escena: esferas con textura, centradas y del tamano pedido; el lado del Sol es el brillante
+    esc = Escena()
+    est = Control().instantanea(0.0)
+    fecha = _fecha(2026, 11, 22, 0, 33)
+    time.sleep(1.0)
+    for n in ("mercurio", "venus"):
+        c, _, _, rot = esc._cuerpos(jd)[n]
+        sol = rot @ (A.sol_posicion(jd) - c)
+        sol /= np.linalg.norm(sol)
+        lado = np.cross(sol, [0.0, 0.0, 1.0])                         # camara a 90 grados del Sol: media fase
+        g, i = A.giro_inclinacion(sol * math.cos(math.radians(80)) + lado / np.linalg.norm(lado) * math.sin(math.radians(80)))
+        for k in range(2):
+            img = esc.componer(0.0, g, est, {}, None, False, False, 0.0, i, fecha, n)
+        x, y, r = esc.astros["objetivos"][n]
+        assert abs(x - 640) < 1 and abs(y - 360) < 1 and abs(r - esc.radio_base) < 1.0
+        gris = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(float)
+        yy, xx = np.mgrid[0:img.shape[0], 0:img.shape[1]]
+        disco = (xx - x) ** 2 + (yy - y) ** 2 < (0.9 * r) ** 2
+        # proyectar la direccion del Sol a pantalla: los pixeles de ese lado son los iluminados
+        cam = esc.camara(0.0, g, i, n, jd)
+        d_sol = A.sol_posicion(jd) - c
+        hacia = np.array([cam.M[0] @ d_sol, cam.M[1] @ d_sol])           # filas de M: derecha, abajo
+        hacia /= np.linalg.norm(hacia)
+        dia = disco & (((xx - x) * hacia[0] + (yy - y) * hacia[1]) > 0.3 * r)
+        noche = disco & (((xx - x) * hacia[0] + (yy - y) * hacia[1]) < -0.3 * r)
+        print(f"  {n}: lado de dia {gris[dia].mean():.0f}, lado de noche {gris[noche].mean():.0f}, "
+              f"variacion {gris[dia].std():.1f}, textura {getattr(esc, n).origen}")
+        assert gris[dia].mean() > 60 and gris[dia].mean() > 4 * gris[noche].mean() + 10
+        assert gris[dia].std() > 2                                     # tiene textura, no es un disco liso
+        cv2.imwrite(str(SALIDA / f"render_{n}.png"), img)
+
+
+def test_primer_horneado_entre_hilos():
+    """Si otro hilo (el precalentado) esta horneando la luz de un astro por primera vez, dibujarlo
+    espera a que termine en vez de fallar con texturas = None (pasaba al abrir la vista del sistema)."""
+    import threading
+    from universo.tierra import Tierra
+    t = Tierra(C.TEXTURA_VENUS, oceanos=False)
+    sol = np.array([0.3, 0.9, 0.1])
+    h = threading.Thread(target=t.iluminar, args=(sol,))
+    h.start()
+    time.sleep(0.01)                                               # el otro hilo ya marco el Sol pero no termina
+    buf = np.zeros((360, 640, 3), np.uint8)
+    t.dibujar(buf, 320, 180, 100, 0.0, 0.0, (0.0, 0.0, 1.0), sol)  # antes: TypeError
+    h.join()
+    assert t.texturas is not None and buf.max() > 50
+
+
 def test_vista_sistema_solar():
     import cv2
     from universo import astros as A
@@ -631,16 +717,16 @@ def test_vista_sistema_solar():
     # desde arriba (inclinacion de la vista = 0): las distancias en pantalla son las del plano de la eclíptica
     incl = -math.radians(C.SISTEMA_INCLINACION)
     for k in range(3):                                             # (los primeros cuadros preparan tablas y luz)
-        img = esc.componer(0.0, 0.0, est, {}, None, False, False, 0.0, incl, fecha, "tierra", None, None, "sistema")
+        img = esc.componer(0.0, 0.0, est, {}, None, False, False, float(k), incl, fecha, "tierra", None, None, "sistema")
     t0 = time.perf_counter()
-    for k in range(5):
-        img = esc.componer(0.0, 0.0, est, {}, None, False, False, 0.0, incl, fecha, "tierra", None, None, "sistema")
+    for k in range(5):                                             # t > SISTEMA_TRANSICION: ya termino el fundido
+        img = esc.componer(0.0, 0.0, est, {}, None, False, False, 9.0, incl, fecha, "tierra", None, None, "sistema")
     ms = (time.perf_counter() - t0) / 5 * 1000
     a = esc.astros
-    assert a["modo"] == "sistema" and set(a["objetivos"]) == {"sol", "tierra", "marte"}
+    assert a["modo"] == "sistema" and set(a["objetivos"]) == {"sol", "mercurio", "venus", "tierra", "marte"}
     px_ua = a["px_ua"]
     sx, sy, _ = a["objetivos"]["sol"]
-    for n in ("tierra", "marte"):
+    for n in ("mercurio", "venus", "tierra", "marte"):
         x, y, _ = a["objetivos"][n]
         P = S.heliocentrica(n, jd)
         print(f"  {n}: {math.hypot(x - sx, y - sy) / px_ua:.3f} UA en pantalla (real {np.hypot(P[0], P[1]):.3f})")

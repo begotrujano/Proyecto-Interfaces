@@ -15,7 +15,7 @@ from universo import astros as A
 from universo import sistema as S
 from universo import config as C
 from universo.cielo import Cielo
-from universo.planetas import textura_marte, textura_sol
+from universo.planetas import textura_marte, textura_mercurio, textura_sol, textura_venus
 from universo.tierra import Tierra
 from universo.vista_sistema import VistaSistema
 
@@ -149,6 +149,10 @@ class Escena:
         self.cielo = Cielo(ancho, alto, self.focal)
         self.tierra = Tierra(textura, ruta_noche=C.TEXTURA_NOCHE)
         self.luna = Tierra(C.TEXTURA_LUNA, R=300, atmosfera=False)
+        self.mercurio = Tierra(C.TEXTURA_MERCURIO, atmosfera=False, oceanos=False,
+                               desfase_lon=C.DESFASE_TEXTURA_MERCURIO, respaldo=lambda: textura_mercurio(2048))
+        self.venus = Tierra(C.TEXTURA_VENUS, oceanos=False, color_atm=C.COLOR_ATM_VENUS,  # atmosfera densa: halo
+                            desfase_lon=C.DESFASE_TEXTURA_VENUS, respaldo=lambda: textura_venus(1024))
         self.marte = Tierra(C.TEXTURA_MARTE, atmosfera=False, oceanos=False, desfase_lon=C.DESFASE_TEXTURA_MARTE,
                             respaldo=lambda: textura_marte(2048))
         self.sol = Tierra(C.TEXTURA_SOL, emisivo=True, color_atm=C.COLOR_HALO_SOL,
@@ -164,11 +168,11 @@ class Escena:
         threading.Thread(target=self._precalentar, daemon=True, name="precalentar").start()
 
     def _precalentar(self):
-        """Hornea la luz de Marte y del Sol al arrancar, para que el primer viaje no se trabe."""
+        """Hornea la luz de los planetas y del Sol al arrancar, para que el primer viaje no se trabe."""
         try:
             jd = A.dia_juliano(fecha_actual())
             cuerpos = self._cuerpos(jd)
-            for nombre in ("marte", "sol"):
+            for nombre in [n for n in C.PLANETAS_ACTIVOS if n != "tierra" and n in cuerpos] + ["sol"]:
                 centro, _, dib, rot = cuerpos[nombre]
                 d = cuerpos["sol"][0] - centro
                 dib.iluminar(rot @ (d / np.linalg.norm(d)) if nombre != "sol" else np.array([1.0, 0.0, 0.0]))

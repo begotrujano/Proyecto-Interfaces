@@ -11,7 +11,7 @@ planetas interiores y ~0.05 para los exteriores. Mas que suficiente para ver cad
 donde esta de verdad, su orbita elíptica y su fase/ilumination reales.
 
 Agregar un planeta nuevo al programa = ponerlo en config.PLANETAS_ACTIVOS y darle datos
-fisicos en FISICOS (radio, polo y rotacion) y una textura (render.Escena._crear_cuerpos).
+fisicos en FISICOS (radio, polo y rotacion) y una textura (config.TEXTURA_<PLANETA> y un Tierra(...) en render.Escena.__init__).
 """
 
 import math
@@ -55,6 +55,9 @@ PRECESION_GRADOS_SIGLO = 1.396971     # los elementos son de J2000; esto los lle
 # (ascension recta, declinacion: valor J2000 y cambio por siglo) y meridiano 0 (W0 y grados por dia).
 FISICOS = {
     "sol": dict(radio_km=A.RADIO_SOL_KM, ra=(286.13, 0.0), dec=(63.87, 0.0), w=(84.176, 14.1844000)),
+    "mercurio": dict(radio_km=2439.7, ra=(281.0097, -0.0328), dec=(61.4143, -0.0049), w=(329.5469, 6.1385025)),
+    # Venus gira al reves (retrogrado): su meridiano 0 avanza hacia atras, una vuelta cada 243 dias
+    "venus": dict(radio_km=6051.8, ra=(272.76, 0.0), dec=(67.16, 0.0), w=(160.20, -1.4813688)),
     "marte": dict(radio_km=3389.5, ra=(317.68143, -0.1061), dec=(52.88650, -0.0609), w=(176.630, 350.89198226)),
 }
 
@@ -98,7 +101,9 @@ def _plano_a_ecliptica(x, y, i, w_per, nodo):
 
 
 def _precesion(v, t):
-    return v @ _rz(-PRECESION_GRADOS_SIGLO * _RAD * t)      # gira los ejes: las longitudes crecen
+    # v @ R = R.T @ v: con R = _rz(+p) los vectores giran +p alrededor del polo, asi que las longitudes
+    # crecen p (antes iba con -p y todo quedaba 2p corrido: ~0.5 grados en 2019, validado con los transitos)
+    return v @ _rz(PRECESION_GRADOS_SIGLO * _RAD * t)
 
 
 def heliocentrica(nombre, jd):

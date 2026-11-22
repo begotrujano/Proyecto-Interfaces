@@ -18,6 +18,7 @@ Como se hace rapido:
     proporcional al tamano en pantalla.
 """
 
+import functools
 import math
 import threading
 from pathlib import Path
@@ -127,6 +128,13 @@ def _piramide(img, ancho_min=128):
 # ----------------------------------------------------------------------
 # Tablas de la esfera e iluminacion (en el plano de la imagen)
 # ----------------------------------------------------------------------
+@functools.lru_cache(maxsize=None)
+def niveles_esfera(R, atmosfera, interior):
+    """Piramide de tablas de la esfera, COMPARTIDA entre astros iguales (~64 MB cada una con R=600):
+    Tierra y Venus usan la misma, Mercurio y Marte otra. Solo se lee, nunca se modifica."""
+    return tuple(piramide_tablas(*tablas_esfera(R, atmosfera=atmosfera, interior=interior)))
+
+
 def tablas_esfera(R=600, margen=1.18, atmosfera=True, interior=True):
     """Tabla de normales (marco de la camara) y geometria fija del disco.
     La iluminacion ya NO se precalcula: depende de donde este el Sol respecto a la camara."""
@@ -262,7 +270,7 @@ class Tierra:
             if noche.shape[:2] != bgr.shape[:2]:
                 noche = cv2.resize(noche, (bgr.shape[1], bgr.shape[0]), interpolation=cv2.INTER_AREA)
             self._noche, self.origen_noche = noche, Path(ruta_noche).name
-        self.niveles = piramide_tablas(*tablas_esfera(R, atmosfera=atmosfera, interior=not emisivo))
+        self.niveles = niveles_esfera(R, bool(atmosfera), not emisivo)
         self._cache = None
         self._cache_incl = None
         self._luts = (None, None)
@@ -271,6 +279,7 @@ class Tierra:
         self.texturas = None                              # se hornea con el primer Sol que llegue
         self._sol_horneado = None
         self._hilo = None
+        self._lock_primera = threading.Lock()
 
     # ------------------------------------------------------------------
     def iluminar(self, sol_tierra, esperar=False):
@@ -278,7 +287,14 @@ class Tierra:
         el Sol se movio mas de config.SOL_REHORNEAR_GRADOS desde la ultima vez."""
         s = np.asarray(sol_tierra, np.float64)
         s = s / np.linalg.norm(s)
-        if self.emisivo and self.texturas is not None:
+        if self.texturas is None:                         # primera vez: hornear ya, o esperar a otro hilo
+            with self._lock_primera:                      # (p. ej. el precalentado) que ya este en ello;
+                if self.texturas is None:                 # si no, dibujar() veria texturas = None
+                    self._sol_horneado = s
+                    lit = iluminar_textura(self._dia, self._mar, self._noche, s, self.atmosfera, self.emisivo)
+                    self.texturas = _piramide(lit)
+            return
+        if self.emisivo:
             return
         if self._sol_horneado is not None:
             ang = math.degrees(math.acos(float(np.clip(s @ self._sol_horneado, -1, 1))))

@@ -57,11 +57,19 @@ ETIQUETAS_ASTROS = True
 # nombre de la primera (mira herramientas/descargar_texturas.py); si no esta, se usa la procedural.
 TEXTURA_MARTE = ["assets/marte_nasa_viking.jpg", "assets/marte_procedural.jpg"]
 TEXTURA_SOL = ["assets/sol_nasa_sdo.jpg", "assets/sol_procedural.jpg"]
+TEXTURA_MERCURIO = ["assets/mercurio_nasa_messenger.jpg", "assets/mercurio_procedural.jpg"]
+# Venus: desde el espacio solo se ven sus nubes (acido sulfurico). Si prefieres ver la superficie
+# (radar de Magellan), bajala de science.nasa.gov/3d-resources/venus como "assets/venus_nasa_magellan.jpg"
+# y ponla primero en esta lista. venus_nubes.jpg la baja herramientas/descargar_texturas.py.
+TEXTURA_VENUS = ["assets/venus_nubes.jpg", "assets/venus_procedural.jpg"]
 DESFASE_TEXTURA_MARTE = 0.0        # grados; si la imagen de Marte trae la longitud 0 en un borde y no al centro, usa 180
 DESFASE_TEXTURA_SOL = 0.0
+DESFASE_TEXTURA_MERCURIO = 0.0     # igual que el de Marte (la procedural ya trae la longitud 0 al centro)
+DESFASE_TEXTURA_VENUS = 0.0
+COLOR_ATM_VENUS = (0.55, 0.86, 1.0)  # BGR del halo de Venus: bruma amarilla palida (a contraluz se enciende el anillo)
 BRILLO_SOL = 1.25                  # el Sol emite: >1 satura el centro a blanco; el borde queda anaranjado
 COLOR_HALO_SOL = (0.40, 0.75, 1.0) # BGR del halo junto al disco del Sol
-PLANETAS_ACTIVOS = ("tierra", "marte")      # los que ya se dibujan como esfera. Agrega uno al implementarlo.
+PLANETAS_ACTIVOS = ("mercurio", "venus", "tierra", "marte")   # los que ya se dibujan como esfera. Agrega uno al implementarlo.
 PUNTO_ASTRO_MIN = 1.2              # radio (px) bajo el cual un planeta se dibuja como un punto brillante
 
 # ----------------------------------------------------------------------
