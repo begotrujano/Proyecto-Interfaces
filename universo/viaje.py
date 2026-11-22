@@ -71,7 +71,8 @@ class Viaje:
     destino: centro del astro de llegada; radio_destino: su radio (radios terrestres);
     dist_final: a que distancia de su centro termina la camara."""
 
-    def __init__(self, nombre, t0, pos0, origen, destino, radio_destino, dist_final):
+    def __init__(self, nombre, t0, pos0, origen, destino, radio_destino, dist_final,
+                 arriba0=(0.0, 0.0, 1.0), arriba1=(0.0, 0.0, 1.0)):
         self.nombre = nombre
         self.t0 = t0
         self.dur = C.VIAJE_DURACION
@@ -86,6 +87,8 @@ class Viaje:
         lado = lado / np.linalg.norm(lado) if np.linalg.norm(lado) > 1e-6 else np.array([0.0, 1.0, 0.0])
         a = math.radians(C.VIAJE_ARCO)
         self.dir_final = self.dir0 * math.cos(a) + lado * math.sin(a)
+        self.arriba0 = np.asarray(arriba0, float) / np.linalg.norm(arriba0)    # norte del astro de salida
+        self.arriba1 = np.asarray(arriba1, float) / np.linalg.norm(arriba1)    # norte del de llegada
         self.d0 = float(np.linalg.norm(d))
         self.d1 = max(dist_final, radio_destino * 1.05)
 
@@ -96,7 +99,9 @@ class Viaje:
         return t - self.t0 >= self.dur
 
     def camara(self, t):
-        """-> (posicion, punto al que mira, intensidad del hiperespacio 0..1)."""
+        """-> (posicion, punto al que mira, intensidad del hiperespacio 0..1, hacia donde es "arriba").
+        El "arriba" pasa del norte del astro de salida al del de llegada, para que al llegar la
+        imagen no gire de golpe."""
         u = self.fase(t)
         g = C.VIAJE_GIRO                                  # fraccion del tiempo para voltear hacia el destino
         mira = _suave(u / g)
@@ -109,4 +114,5 @@ class Viaje:
         lado = lado / (np.linalg.norm(lado) + 1e-12)
         pos = self.destino + (self.dir0 * math.cos(a) + lado * math.sin(a)) * dist
         hiper = math.sin(math.pi * min(max((u - g * 0.6) / (1.0 - g * 0.6), 0.0), 1.0)) ** 0.7
-        return pos, objetivo, hiper
+        arriba = self.arriba0 * (1.0 - avance) + self.arriba1 * avance
+        return pos, objetivo, hiper, arriba / np.linalg.norm(arriba)

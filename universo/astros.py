@@ -71,6 +71,12 @@ def sol(jd):
     return v / np.linalg.norm(v), r_ua * UA_KM
 
 
+def sol_posicion(jd):
+    """Centro del Sol en el marco de la Tierra, en radios terrestres."""
+    d, km = sol(jd)
+    return d * (km / RADIO_TIERRA_KM)
+
+
 def luna(jd):
     """-> vector Tierra->Luna en el marco de la Tierra, en radios terrestres."""
     t = (jd - 2451545.0) / 36525.0
@@ -119,12 +125,24 @@ class Camara:
         self.f, self.cx, self.cy = focal_px, cx, cy
 
     @classmethod
-    def mirando(cls, pos, objetivo, focal_px, cx, cy):
-        """Camara en pos que mira a objetivo, con el norte de la Tierra hacia arriba (para el viaje)."""
+    def en_astro(cls, giro, inclinacion, distancia, focal_px, cx, cy, centro, rot):
+        """Camara en orbita de un astro cualquiera: giro/inclinacion se miden en el marco del
+        astro (rot: marco de la Tierra -> marco del astro) y su polo norte queda ARRIBA en la
+        pantalla. Para la Tierra (rot = identidad) es igual que Camara(...)."""
+        cam = cls(giro, inclinacion, distancia, focal_px, cx, cy)
+        atras_astro = cam.pos / distancia                       # (el centro de cam era el origen)
+        cam.M = cam.M @ rot                                     # ejes de la camara, ahora en marco de la Tierra
+        cam.pos = np.asarray(centro, float) + (rot.T @ atras_astro) * distancia
+        return cam
+
+    @classmethod
+    def mirando(cls, pos, objetivo, focal_px, cx, cy, arriba=(0.0, 0.0, 1.0)):
+        """Camara en pos que mira a objetivo con `arriba` hacia arriba (por omision, el norte
+        de la Tierra). Se usa en el viaje."""
         cam = cls(0.0, 0.0, 1.0, focal_px, cx, cy)
         adelante = np.asarray(objetivo, float) - np.asarray(pos, float)
         adelante /= np.linalg.norm(adelante)
-        derecha = np.cross(adelante, [0.0, 0.0, 1.0])
+        derecha = np.cross(adelante, arriba)
         if np.linalg.norm(derecha) < 1e-6:
             derecha = np.array([0.0, 1.0, 0.0])
         derecha /= np.linalg.norm(derecha)
@@ -133,6 +151,16 @@ class Camara:
         cam.pos = np.asarray(pos, float)
         cam.distancia = float(np.linalg.norm(np.asarray(objetivo, float) - cam.pos))
         return cam
+
+    def ejes_hacia(self, centro):
+        """Ejes de pantalla (derecha, abajo, atras) de la camara apuntada a un astro concreto: la
+        esfera se ve desde la direccion astro -> camara, no desde el eje optico (importa en las orillas)."""
+        atras = self.pos - np.asarray(centro, float)
+        atras = atras / np.linalg.norm(atras)
+        derecha = self.M[0] - (self.M[0] @ atras) * atras
+        n = np.linalg.norm(derecha)
+        derecha = derecha / n if n > 1e-9 else np.cross(self.M[1], atras)
+        return np.stack([derecha, np.cross(derecha, atras), atras])
 
     def a_camara(self, v):
         """Vector(es) del marco de la Tierra -> marco de la camara."""
@@ -158,6 +186,21 @@ def giro_inclinacion(direccion):
     """Direccion desde el centro de un astro hacia la camara -> (giro, inclinacion) de control.py."""
     d = np.asarray(direccion, float) / np.linalg.norm(direccion)
     return -math.atan2(d[1], d[0]), -math.asin(float(np.clip(d[2], -1, 1)))
+
+
+def orientacion_vista(M, rot):
+    """Como se ve un astro desde una camara cualquiera, en los 3 numeros que usa su dibujante:
+    (giro, inclinacion, rodar). M: ejes de la camara en el marco de la Tierra (filas = derecha,
+    abajo, atras); rot: marco de la Tierra -> marco del astro. `rodar` es cuanto esta girada la
+    camara alrededor de su eje de vista respecto a la que tiene el norte del astro arriba."""
+    Mb = M @ rot.T                                   # ejes de la camara en el marco del astro
+    atras = Mb[2] / np.linalg.norm(Mb[2])
+    lon, lat = math.atan2(atras[1], atras[0]), math.asin(float(np.clip(atras[2], -1, 1)))
+    cl, sl, cb, sb = math.cos(lon), math.sin(lon), math.cos(lat), math.sin(lat)
+    derecha_c = np.array([-sl, cl, 0.0])             # la "derecha" de la camara sin rodar...
+    arriba_c = np.array([-sb * cl, -sb * sl, cb])    # ...y su "arriba"
+    rodar = math.atan2(float(Mb[0] @ arriba_c), float(Mb[0] @ derecha_c))
+    return -lon, -lat, rodar
 
 
 def distancia_para_radio(radio_px, focal_px):

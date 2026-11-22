@@ -51,6 +51,31 @@ TEXTURA_LUNA = "assets/luna_nasa_lroc.jpg"   # NASA SVS CGI Moon Kit (LRO), 4096
 ETIQUETAS_ASTROS = True
 
 # ----------------------------------------------------------------------
+# Sol y planetas (esferas con textura, en su posicion real)
+# ----------------------------------------------------------------------
+# Cada textura es una lista: se usa la primera que exista. Pon la imagen de la NASA con el
+# nombre de la primera (mira herramientas/descargar_texturas.py); si no esta, se usa la procedural.
+TEXTURA_MARTE = ["assets/marte_nasa_viking.jpg", "assets/marte_procedural.jpg"]
+TEXTURA_SOL = ["assets/sol_nasa_sdo.jpg", "assets/sol_procedural.jpg"]
+DESFASE_TEXTURA_MARTE = 0.0        # grados; si la imagen de Marte trae la longitud 0 en un borde y no al centro, usa 180
+DESFASE_TEXTURA_SOL = 0.0
+BRILLO_SOL = 1.25                  # el Sol emite: >1 satura el centro a blanco; el borde queda anaranjado
+COLOR_HALO_SOL = (0.40, 0.75, 1.0) # BGR del halo junto al disco del Sol
+PLANETAS_ACTIVOS = ("tierra", "marte")      # los que ya se dibujan como esfera. Agrega uno al implementarlo.
+PUNTO_ASTRO_MIN = 1.2              # radio (px) bajo el cual un planeta se dibuja como un punto brillante
+
+# ----------------------------------------------------------------------
+# Vista del Sistema Solar completo (tecla S, o palma sobre el astro donde estas)
+# ----------------------------------------------------------------------
+SISTEMA_RADIO_REL = 0.40           # a zoom x1 la orbita del planeta activo mas lejano ocupa esta fraccion del alto
+SISTEMA_INCLINACION = 52.0         # grados de inclinacion inicial de la vista (90 = de canto, 0 = desde arriba)
+SISTEMA_GIRO_INICIAL = 35.0        # grados
+SISTEMA_ICONO_PLANETA = 12.0       # radio (px) de un planeta a zoom x1 (crece con el zoom, suave)
+SISTEMA_ICONO_SOL = 19.0
+SISTEMA_MOSTRAR_PENDIENTES = True  # orbitas y puntos de los planetas que aun no se implementan
+SISTEMA_TRANSICION = 0.55          # s del fundido al entrar o salir de la vista
+
+# ----------------------------------------------------------------------
 # Cambiar de astro (solo con el control EN PAUSA): deja la palma sobre un astro
 # ----------------------------------------------------------------------
 SELECCION_SOSTENER = 1.2           # s con la palma encima para elegirlo (anillo blanco)

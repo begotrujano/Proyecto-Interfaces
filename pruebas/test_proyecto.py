@@ -476,8 +476,9 @@ def test_viaje_continuo():
     v = Viaje("luna", 10.0, pos0, tierra, luna, 0.2727, 1.6)
     prev, hipers = None, []
     for k in range(int(C.VIAJE_DURACION * 60) + 1):
-        p, objetivo, h = v.camara(10.0 + k / 60)
+        p, objetivo, h, arriba = v.camara(10.0 + k / 60)
         hipers.append(h)
+        assert abs(np.linalg.norm(arriba) - 1.0) < 1e-9
         if prev is not None:
             assert np.linalg.norm(p - prev) < 3.0, "sin saltos (no es teletransporte)"
         prev = p
@@ -487,6 +488,205 @@ def test_viaje_continuo():
     s = Sim()
     s.ctl.colocar(1.0, -0.4)
     assert s.ctl.giro == 1.0 and s.ctl.inclinacion == -0.4 and s.ctl.omega == 0.0
+
+
+def test_marte_y_planetas():
+    """Efemerides de los planetas: oposiciones y conjunciones reales de Marte, y el orden del sistema."""
+    from universo import astros as A
+    from universo import sistema as S
+
+    def geo(*f):
+        jd = A.dia_juliano(_fecha(*f))
+        g = S.geocentrica("marte", jd)
+        sol = A.sol_posicion(jd)
+        elong = math.degrees(math.acos(float(g @ sol / np.linalg.norm(g) / np.linalg.norm(sol))))
+        return np.linalg.norm(g) / S.UA_RT, elong
+    d, el = geo(2025, 1, 16, 0)                                    # oposicion de Marte
+    print(f"  oposicion 16-ene-2025: {d:.3f} UA, elongacion {el:.0f} grados (real: 0.64 UA)")
+    assert abs(d - 0.642) < 0.01 and el > 170
+    d, el = geo(2022, 12, 8, 0)
+    assert abs(d - 0.545) < 0.01 and el > 170
+    d, el = geo(2026, 1, 9, 0)                                     # conjuncion con el Sol
+    print(f"  conjuncion 9-ene-2026: {d:.2f} UA, elongacion {el:.1f} grados")
+    assert el < 3 and 2.3 < d < 2.5
+    jd = A.dia_juliano(_fecha(2026, 11, 22, 0))
+    radios = [np.linalg.norm(S.heliocentrica(n, jd)) for n in S.ORDEN]
+    assert radios == sorted(radios), "los planetas estan en su orden: Mercurio ... Neptuno"
+    assert abs(radios[2] - 1.0) < 0.02 and 1.38 < radios[3] < 1.67 and 29.5 < radios[7] < 30.3
+    for n in S.ORDEN:                                              # la orbita pasa por el planeta
+        o = S.orbita(n, jd, 720)
+        assert np.min(np.linalg.norm(o - S.heliocentrica(n, jd), axis=1)) < 0.02 * np.linalg.norm(S.heliocentrica(n, jd))
+
+
+def test_rotacion_de_astros():
+    from universo import astros as A
+    from universo import sistema as S
+    jd = A.dia_juliano(_fecha(2026, 11, 22, 0))
+    for n in ("sol", "marte"):
+        R = S.rotacion(n, jd)
+        assert np.allclose(R @ R.T, np.eye(3), atol=1e-12) and abs(np.linalg.det(R) - 1) < 1e-12
+    # el polo de Marte (en el marco ecuatorial) esta donde dice la IAU: AR 317.7, Dec 52.9
+    polo = A.ecuatorial_a_tierra(jd).T @ S.rotacion("marte", jd).T @ np.array([0.0, 0.0, 1.0])
+    assert abs(math.degrees(math.asin(polo[2])) - 52.87) < 0.1
+    assert abs(math.degrees(math.atan2(polo[1], polo[0])) % 360 - 317.65) < 0.1
+    # Marte gira una vuelta (sidereal) en 24.623 h: tras ese tiempo el meridiano 0 vuelve a apuntar igual
+    R1, R2 = S.rotacion("marte", jd), S.rotacion("marte", jd + 24.6229 / 24.0)
+    cuerpo = lambda R, jd_: R @ A.ecuatorial_a_tierra(jd_) @ np.array([1.0, 0, 0])
+    d = math.degrees(math.acos(float(np.clip(cuerpo(R1, jd) @ cuerpo(R2, jd + 24.6229 / 24.0), -1, 1))))
+    print(f"  Marte tras 24.623 h: el mismo punto del cielo gira {d:.2f} grados")
+    assert d < 0.2
+    # la camara "en astro" deja el polo del astro arriba en la pantalla
+    f = 1000.0
+    cam = A.Camara.en_astro(0.7, -0.3, 6.0, f, 640, 360, np.array([100.0, 50.0, -20.0]), S.rotacion("marte", jd))
+    polo_ecef = S.rotacion("marte", jd).T @ np.array([0.0, 0.0, 1.0])
+    x, y, _ = cam.proyectar_punto(np.array([100.0, 50.0, -20.0]) + polo_ecef)
+    assert abs(x - 640) < 1e-6 and y < 360 - 100
+    g, i, rod = A.orientacion_vista(cam.M, S.rotacion("marte", jd))
+    assert abs(g - 0.7) < 1e-9 and abs(i + 0.3) < 1e-9 and abs(rod) < 1e-9
+
+
+def test_dibujo_con_camara_rodada():
+    """Las normales de la esfera con (giro, inclinacion, rodar) coinciden con la geometria directa:
+    asi un astro se ve bien orientado desde CUALQUIER camara, no solo con su norte arriba."""
+    import cv2
+    from universo import astros as A
+    from universo.tierra import Tierra, tablas_esfera
+    tabla, _, _ = tablas_esfera(200)
+    normales = tuple(cv2.split(tabla))
+    dentro = tabla[..., 2] > 0.3
+    n = tabla[dentro].astype(np.float64)
+    rng = np.random.default_rng(3)
+    peor = 0.0
+    for _ in range(8):
+        Q = np.linalg.qr(rng.normal(size=(3, 3)))[0]
+        Q *= np.sign(np.linalg.det(Q))
+        M = np.stack([Q[0], -Q[1], Q[2]])                          # ejes de camara: derecha, abajo, atras
+        P = np.linalg.qr(rng.normal(size=(3, 3)))[0]
+        P *= np.sign(np.linalg.det(P))                             # rotacion marco Tierra -> astro
+        g, i, rod = A.orientacion_vista(M, P)
+        lon_cam, colat = Tierra._latlon(normales, i, rod)
+        lon = (lon_cam[dentro] - g) % (2 * math.pi)
+        nb = n @ (M @ P.T)                                         # normal de cada pixel, en el marco del astro
+        lon_esp = np.arctan2(nb[:, 1], nb[:, 0]) % (2 * math.pi)
+        col_esp = np.arccos(np.clip(nb[:, 2], -1, 1))
+        d_lon = np.abs((lon - lon_esp + math.pi) % (2 * math.pi) - math.pi) * np.sin(col_esp)
+        peor = max(peor, float(d_lon.max()), float(np.abs(colat[dentro] - col_esp).max()))
+    print(f"  error maximo de orientacion: {peor:.1e} rad")
+    assert peor < 2e-3
+
+
+def test_sol_y_marte_en_escena():
+    import cv2
+    from universo import astros as A
+    from universo.render import Escena
+    esc = Escena()
+    est = Control().instantanea(0.0)
+    fecha = _fecha(2026, 11, 22, 0, 33)
+    time.sleep(1.5)                                                # termina de hornear la luz de Marte
+    def cuadro(foco, giro=1.0, incl=0.0, le=0.0):
+        for k in range(2):
+            img = esc.componer(le, giro, est, {}, None, False, False, 0.0, incl, fecha, foco)
+        return img
+    # desde la Tierra: Marte es un punto en su direccion real, a la distancia real
+    cuadro("tierra", math.radians(99))
+    a = esc.astros
+    jd = A.dia_juliano(fecha)
+    marte = A.np.asarray(__import__("universo.sistema", fromlist=["x"]).geocentrica("marte", jd))
+    print(f"  Marte visto desde la Tierra: {a['dist_km']['marte'] / 1e6:.0f} millones de km")
+    assert abs(a["dist_km"]["marte"] - np.linalg.norm(marte) * A.RADIO_TIERRA_KM) < 10
+    assert 150e6 < a["dist_km"]["marte"] < 400e6 and "marte" in a["objetivos"]
+    # orbitando Marte y el Sol: son esferas de verdad (con textura), centradas y del tamano pedido
+    for foco in ("marte", "sol"):
+        img = cuadro(foco, math.radians(40), math.radians(-25))
+        a = esc.astros
+        x, y, r = a["objetivos"][foco]
+        assert abs(x - 640) < 1 and abs(y - 360) < 1 and abs(r - esc.radio_base) < 1.0
+        disco = img[int(y - r * 0.6):int(y + r * 0.6), int(x - r * 0.6):int(x + r * 0.6)].astype(float)
+        print(f"  {foco}: brillo medio del disco {disco.mean():.0f}, variacion {disco.std():.0f} (textura)")
+        assert disco.max() > 60 and disco.std() > 3
+        cv2.imwrite(str(SALIDA / f"render_{foco}.png"), img)
+        assert a["altitud_km"] > 0
+    # el Sol desde la Tierra mide lo mismo que el Sol real (0.267 grados de radio)
+    s = A.sol(jd)[0]                                               # camara casi opuesta al Sol: queda detras, al lado de la Tierra
+    e = np.array([0.0, 0.0, 1.0]) - s[2] * s
+    c = -s * math.cos(math.radians(15)) + e / np.linalg.norm(e) * math.sin(math.radians(15))
+    g, i = A.giro_inclinacion(c)
+    cuadro("tierra", g, i)
+    _, _, r_sol = esc.astros["objetivos"].get("sol", (0, 0, 0))
+    esperado = esc.focal * math.tan(math.radians(C.SOL_ANGULO_RADIO_GRADOS))
+    print(f"  radio aparente del Sol desde la Tierra: {r_sol:.2f} px (esperado {esperado:.2f})")
+    assert abs(r_sol - esperado) < 0.4
+    cv2.imwrite(str(SALIDA / "render_tierra_con_marte.png"), cuadro("tierra", math.radians(99)))
+
+
+def test_vista_sistema_solar():
+    import cv2
+    from universo import astros as A
+    from universo import sistema as S
+    from universo.render import Escena
+    esc = Escena()
+    est = Control().instantanea(0.0)
+    fecha = _fecha(2026, 11, 22, 0, 33)
+    jd = A.dia_juliano(fecha)
+    # desde arriba (inclinacion de la vista = 0): las distancias en pantalla son las del plano de la eclíptica
+    incl = -math.radians(C.SISTEMA_INCLINACION)
+    for k in range(3):                                             # (los primeros cuadros preparan tablas y luz)
+        img = esc.componer(0.0, 0.0, est, {}, None, False, False, 0.0, incl, fecha, "tierra", None, None, "sistema")
+    t0 = time.perf_counter()
+    for k in range(5):
+        img = esc.componer(0.0, 0.0, est, {}, None, False, False, 0.0, incl, fecha, "tierra", None, None, "sistema")
+    ms = (time.perf_counter() - t0) / 5 * 1000
+    a = esc.astros
+    assert a["modo"] == "sistema" and set(a["objetivos"]) == {"sol", "tierra", "marte"}
+    px_ua = a["px_ua"]
+    sx, sy, _ = a["objetivos"]["sol"]
+    for n in ("tierra", "marte"):
+        x, y, _ = a["objetivos"][n]
+        P = S.heliocentrica(n, jd)
+        print(f"  {n}: {math.hypot(x - sx, y - sy) / px_ua:.3f} UA en pantalla (real {np.hypot(P[0], P[1]):.3f})")
+        assert abs(math.hypot(x - sx, y - sy) / px_ua - np.hypot(P[0], P[1])) < 0.01
+        assert abs(math.atan2(-(y - sy), x - sx) - math.atan2(P[1], P[0])) < 0.01    # y tambien el angulo: el norte eclíptico arriba
+    # el zoom por omision encuadra la orbita del planeta activo mas lejano (Marte, afelio 1.67 UA)
+    assert abs(px_ua * 1.666 - C.SISTEMA_RADIO_REL * esc.h) < 1.0
+    # las orbitas dibujadas pasan por los planetas: hay pixeles de color de Marte bajo su icono
+    print(f"  vista del sistema: {ms:.1f} ms por cuadro")
+    assert ms < 40
+    cv2.imwrite(str(SALIDA / "render_sistema_solar.png"), img)
+    img = esc.componer(math.log(0.25), 0.8, est, {}, None, False, False, 9.0, 0.3, fecha, "tierra", None, None, "sistema")
+    cv2.imwrite(str(SALIDA / "render_sistema_solar_lejos.png"), img)
+
+
+def test_cambio_de_vista_en_la_aplicacion():
+    """Tecla S: entra y sale de la vista del sistema conservando donde estabas; elegir Marte desde el
+    sistema viaja a Marte y llega orbitandolo con el norte arriba y el zoom x1."""
+    from main import Aplicacion, Captura
+    app = Aplicacion(Captura(FuenteFalsa().leer), DetectorGuion())
+    app.control.colocar(1.234, -0.3)
+    app.control.fijar_escala(math.log(2.0))
+    app.paso_render()
+    app.alternar_sistema()
+    assert app.modo == "sistema" and abs(math.exp(app.control.log_escala) - 1.0) < 1e-6
+    app.paso_render()
+    assert app.escena.astros["modo"] == "sistema"
+    app.alternar_sistema()
+    assert app.modo == "astro" and abs(app.control.giro - 1.234) < 1e-9 and abs(math.exp(app.control.log_escala) - 2.0) < 1e-6
+    app.alternar_sistema()
+    app.paso_render()
+    t = time.perf_counter()
+    app._viajar("marte", t)
+    assert app.modo == "astro" and app.viaje is not None and app.viaje.nombre == "marte"
+    app.paso_render()
+    app.viaje.t0 = t - C.VIAJE_DURACION - 1                       # ya termino
+    app.paso_render()
+    assert app.foco == "marte" and app.viaje is None
+    from universo import astros as A
+    f = app.escena.camara(app.suave.log_escala, app.suave.giro, app.suave.inclinacion, "marte",
+                          A.dia_juliano(__import__("universo.render", fromlist=["x"]).fecha_actual()))
+    x, y, r = app.escena.astros["objetivos"]["marte"]
+    print(f"  llegada a Marte: centro ({x:.0f}, {y:.0f}) radio {r:.0f}px")
+    assert abs(x - 640) < 3 and abs(y - 360) < 3 and abs(r - app.escena.radio_base) < 3
+    app.tecla(ord("r"))
+    assert app.foco == "tierra" and app.modo == "astro"
 
 
 def test_render():

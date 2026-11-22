@@ -224,6 +224,7 @@ class Cielo:
         """Suma el Sol (disco + resplandor) en (x, y). visible 0..1 (tapado por la Tierra)."""
         if visible <= 0.01:
             return
+        visible = min(visible, 1.0)
         nivel = round(visible * 20) / 20
         spr = self._sol_u8.get(nivel)
         if spr is None:

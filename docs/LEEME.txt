@@ -28,7 +28,8 @@ COMO SE USA
   Si tus manos salen al reves (la derecha hace zoom), presiona I.
 
 TECLAS
-  Espacio activar/pausar   R reiniciar   I intercambiar manos   V camara
+  Espacio activar/pausar   S sistema solar completo (y volver)
+  R reiniciar   I intercambiar manos   V camara
   H informacion de depuracion   F pantalla completa   Q o Esc salir
 
 SI ALGO NO SE SIENTE BIEN -> universo\config.py (tiene la guia al inicio)
@@ -46,12 +47,25 @@ ARCHIVOS
   universo/manos.py          filtro anti-temblor, seguimiento, rol izquierda/derecha, puno y OK
   universo/control.py        activacion con OK, zoom, giro e inclinacion con swipe e inercia
   universo/astros.py         posiciones reales del Sol, la Luna y las estrellas; la camara en orbita
+  universo/sistema.py        los planetas: orbitas, posiciones y rotacion reales
+  universo/planetas.py       texturas procedurales de Marte y el Sol (respaldo)
+  universo/vista_sistema.py  la vista del Sistema Solar completo
+  herramientas/              descargar_texturas.py (textura NASA de Marte)
   universo/cielo.py          Via Lactea, estrellas, Sol y Luna
   universo/tierra.py         la Tierra con el dia y la noche reales y las luces de las ciudades
   universo/render.py         orden de dibujo, guias de las manos, textos, camara en miniatura
   pruebas/simulacion.py      manos 3D sinteticas para probar sin camara
   pruebas/test_proyecto.py   pruebas sin camara:  python pruebas\test_proyecto.py
   assets/  modelos/  docs/   textura de la Tierra, modelo de MediaPipe, documentacion
+
+MARTE, EL SOL Y EL SISTEMA SOLAR
+  - En pausa, deja la palma sobre un astro (un punto, como Marte desde la Tierra) hasta
+    que se llene el anillo: viajas a el. Con Marte y el Sol funcionan igual los gestos que
+    con la Tierra: zoom, girar e inclinar.
+  - Tecla S: ves todo el Sistema Solar desde arriba. Zoom con la mano izquierda, gira o
+    inclina la vista con la derecha. Palma sobre un astro = viajar a el; sobre el astro donde
+    estabas (o S otra vez) = volver.
+  - Para la textura real de Marte (NASA): python herramientas\descargar_texturas.py
 
 LO QUE VES ES REAL
   El Sol, la Luna y las estrellas estan donde estan en este momento (o en la fecha

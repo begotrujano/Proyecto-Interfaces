@@ -95,6 +95,12 @@ class Control:
             self.giro, self.inclinacion = float(giro), float(inclinacion)
             self.omega = self.omega_v = 0.0
 
+    def fijar_escala(self, log_escala):
+        """Pone el zoom en un valor (logaritmo de la escala) sin velocidad: al cambiar de vista."""
+        with self.lock:
+            self._soltar(self._t_det or 0.0)
+            self.log_escala = float(np.clip(log_escala, math.log(C.ESCALA_MIN), math.log(C.ESCALA_MAX)))
+
     def avisar(self, texto):
         """Aviso en pantalla desde otro hilo (p. ej. al cambiar la exposicion con el teclado)."""
         with self.lock:

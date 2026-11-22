@@ -36,8 +36,10 @@ from universo.manos import SeguidorManos
 from universo.render import Escena, fecha_actual
 from universo.viaje import Selector, Viaje
 from universo import astros as A
+from universo import sistema as S
 
 TITULO = "Universo en tus manos"
+NOMBRES = S.NOMBRES
 
 
 # ----------------------------------------------------------------------
@@ -247,6 +249,9 @@ class Suave:
         self.giro = None
         self.inclinacion = None
 
+    def reiniciar(self):
+        self.log_escala = self.giro = self.inclinacion = None
+
     def paso(self, log_escala, giro, inclinacion, dt):
         if self.log_escala is None or abs(giro - self.giro) > math.pi:
             self.log_escala, self.giro, self.inclinacion = log_escala, giro, inclinacion
@@ -273,6 +278,8 @@ class Aplicacion:
         self.foco = "tierra"              # astro que orbita la camara
         self.selector = Selector()
         self.viaje = None
+        self.modo = "astro"               # "astro" (orbitando un astro) o "sistema" (todo el Sistema Solar)
+        self._guardado = None             # (zoom, giro, inclinacion) del astro mientras ves el sistema
 
     def iniciar(self):
         self.captura.start()
@@ -304,7 +311,7 @@ class Aplicacion:
         return self.escena.componer(self.suave.log_escala, self.suave.giro, est, info,
                                     self.captura.frame, self.ver_camara, self.ver_info, t,
                                     self.suave.inclinacion, foco=self.foco, viaje=self.viaje,
-                                    seleccion=seleccion)
+                                    seleccion=seleccion, modo=self.modo)
 
     # ------------------------------------------------------------------
     # Cambiar de astro: en pausa, palma encima del astro -> anillo blanco -> viaje
@@ -315,22 +322,57 @@ class Aplicacion:
             return None
         cursores = [(v.id, v.x, v.y) for v in est.manos if v.visible]
         objetivos = self.escena.astros.get("objetivos", {})
-        vista, elegido = self.selector.actualizar(cursores, objetivos, self.foco, t)
+        # en la vista del sistema tambien se puede elegir el astro donde ya estas: es "volver a el"
+        vista, elegido = self.selector.actualizar(cursores, objetivos, None if self.modo == "sistema" else self.foco, t)
         if elegido:
-            self._viajar(elegido, t)
+            if self.modo == "sistema" and elegido == self.foco:
+                self.alternar_sistema(t)
+            else:
+                self._viajar(elegido, t)
         return vista
+
+    def alternar_sistema(self, t=None):
+        """Entra o sale de la vista del Sistema Solar completo (tecla S)."""
+        if self.viaje is not None:
+            return
+        with self.control.lock:
+            est_giro, est_incl, est_esc = self.control.giro, self.control.inclinacion, self.control.log_escala
+        if self.modo == "astro":
+            self._guardado = (est_esc, est_giro, est_incl)
+            self.modo = "sistema"
+            self.control.colocar(math.radians(C.SISTEMA_GIRO_INICIAL), 0.0)
+            self.control.fijar_escala(0.0)
+            self.control.avisar("Sistema Solar")
+        else:
+            esc, giro, incl = self._guardado or (0.0, est_giro, est_incl)
+            self.modo = "astro"
+            self.control.colocar(giro, incl)
+            self.control.fijar_escala(esc)
+            self.control.avisar("Vista de " + NOMBRES.get(self.foco, self.foco))
+        self.suave.reiniciar()
+        self.selector.reiniciar()
 
     def _viajar(self, destino, t):
         jd = A.dia_juliano(fecha_actual())
         cuerpos = self.escena._cuerpos(jd)
-        cam = self.escena.astros.get("camara")
-        if cam is None:
-            return
-        centro, R, _, _ = cuerpos[destino]
-        radio = self.escena.radio_base * math.exp(self.suave.log_escala)
+        if self.modo == "sistema":                       # sales de la vista del sistema: llegas con zoom x1
+            esc, giro, incl = self._guardado or (0.0, self.suave.giro, self.suave.inclinacion)
+            self.modo = "astro"
+            self.control.fijar_escala(0.0)
+            self.suave.reiniciar()
+            esc_llegada = 0.0
+        else:
+            esc, giro, incl = self.suave.log_escala, self.suave.giro, self.suave.inclinacion
+            esc_llegada = esc
+        cam = self.escena.camara(esc, giro, incl, self.foco, jd, cuerpos)      # donde esta la camara ahora
+        centro, R, _, rot_d = cuerpos[destino]
+        radio = self.escena.radio_base * math.exp(esc_llegada)
         dist = R * A.distancia_para_radio(radio, self.escena.focal)
-        self.viaje = Viaje(destino, t, cam.pos, cuerpos[self.foco][0], centro, R, dist)
-        self.control.avisar(f"Viajando a la {'Luna' if destino == 'luna' else 'Tierra'}")
+        norte = np.array([0.0, 0.0, 1.0])
+        self.viaje = Viaje(destino, t, cam.pos, cuerpos[self.foco][0], centro, R, dist,
+                           cuerpos[self.foco][3].T @ norte, rot_d.T @ norte)
+        art = S.ARTICULOS.get(destino, "")
+        self.control.avisar(f"Viajando a {art + ' ' if art else ''}{NOMBRES[destino]}")
 
     def _llegar(self):
         """Fin del viaje: la camara queda en orbita del nuevo astro, justo donde llego."""
@@ -352,7 +394,10 @@ class Aplicacion:
         elif k == ord("r"):
             with self.control.lock:
                 self.control.reiniciar()
-            self.foco, self.viaje = "tierra", None
+            self.foco, self.viaje, self.modo = "tierra", None, "astro"
+            self.suave.reiniciar()
+        elif k == ord("s"):
+            self.alternar_sistema(time.perf_counter())
         elif k == ord("i"):
             self.control.intercambiar_manos()
         elif k in (ord("["), ord("]"), ord("e")) and hasattr(self.captura, "cambiar_exposicion"):

@@ -196,7 +196,8 @@ Proyecto Final/
 - Condiciones de la demo: un usuario a la vez, luz, distancia de 40–80 cm, ¿webcam externa?
 
 **Hoja de ruta:**
-1. Luna (órbita y fases).
+1. Luna (órbita y fases). **Hecho.**
+   - Marte, el Sol (esfera real) y la vista del Sistema Solar completo (tecla S) con los 8 planetas en sus órbitas reales. **Hecho.** Siguiente: implementar los demás planetas uno por uno (ver CLAUDE.md, «Agregar un planeta»).
 2. Sistema Solar con escala logarítmica y regla de escala visible.
 3. Misión del cometa (desviar con física real).
 4. Fichas educativas al tocar objetos.
