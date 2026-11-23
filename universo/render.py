@@ -251,12 +251,22 @@ class Escena:
             self.texto.dibujar(self.buf, f"clic: {accion} {NOMBRES.get(nombre, nombre)}" if accion == "ir a"
                                else f"clic: volver a {NOMBRES.get(nombre, nombre)}",
                                x, y + max(r, 12.0) + 16, 13, COL_TEXTO, False, "c")
+        modos = info.get("modos")
+        if modos is not None:
+            corte, gravedad, comparador, quiz = modos
+            corte.dibujar(self, foco)
+            gravedad.dibujar(self, foco)
+            comparador.dibujar(self, A.dia_juliano(fecha or fecha_actual()), t)
+            quiz.dibujar(self, t)
         if estado.activo:
             self._barra_zoom(log_escala, estado.zoom_agarrado)
+        menu = info.get("menu")
+        if menu is not None:
+            menu.dibujar(self)
         self._manos(estado)
         if ver_camara and frame is not None:
             self._camara(frame, estado)
-        if ficha_visible:
+        if ficha_visible and not (modos and modos[2].activo):
             self._ficha(*ficha)
         self._hud(log_escala, giro, inclinacion, estado, info, ver_info, modo)
         self._avisos(estado, t)
@@ -596,9 +606,8 @@ class Escena:
                              f"ok {v.ratio_ok:.2f} (<{C.OK_ON})   dedos {v.estirados}/3",
                           20, y, 13, COL_IZQ if v.rol == "izq" else COL_DER)
                 y += 19
-            T.dibujar(b, "Espacio activar/pausar · R reiniciar · I intercambiar manos · V cámara · "
-                         "S sistema solar · , . tiempo · T ahora · D ficha · [ ] exposición · H info · F pantalla completa · Q salir",
-                      self.w - 16, 22, 13, COL_TENUE, ancla="d")
+            T.dibujar(b, "Espacio pausa · R reset · S sistema · C comparar · G gravedad · X corte · K quiz · , . tiempo · T ahora · D ficha · H info · F full · Q salir",
+                      self.w - 16, 22, 11, COL_TENUE, ancla="d")
 
         if estado.activo:
             msg = ("Izquierda: puño y sube o baja = zoom     ·     Derecha: swipe a los lados = girar, "

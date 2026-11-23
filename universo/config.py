@@ -53,9 +53,24 @@ BRILLO_LUNA = 0.85
 LUZ_TIERRA_EN_LUNA = 0.03          # "luz cenicienta": la Tierra ilumina un poco el lado oscuro
 TEXTURA_LUNA = "assets/luna_nasa_lroc.jpg"   # NASA SVS CGI Moon Kit (LRO), 4096x2048
 ETIQUETAS_ASTROS = True
-FICHA_DURACION = 9.0               # s que se ve la ficha educativa al llegar a un astro (tecla D: fijarla/ocultarla)
-FICHA_ANCHO = 380                  # px
+FICHA_DURACION = 22.0               # s que se ve la ficha educativa al llegar a un astro (tecla D: fijarla/ocultarla)
+FICHA_ANCHO = 420                  # px
 ETIQUETA_UNIR_PX = 14.0           # astros a menos de esto en pantalla comparten etiqueta ("Tierra · Luna")
+
+# ----------------------------------------------------------------------
+# Tarjetas educativas nuevas (Comparador, Gravedad, Corte transversal, Quiz)
+# ----------------------------------------------------------------------
+PESO_NINO_KG = 30.0                # peso base para "¿Cuánto pesarías aquí?" (teclas +/- para cambiarlo)
+SALTO_TIERRA_M = 0.45              # salto base en la Tierra (metros)
+LANZAR_V_ON = 1.6                  # velocidad vertical hacia arriba (altos/s) para lanzar la pelota
+
+CORTE_DIST_MIN = 0.16              # distancia normalizada entre manos: cerrado (0 %)
+CORTE_DIST_MAX = 0.46              # distancia normalizada entre manos: totalmente abierto (100 %)
+
+COMPARADOR_DIST_JUNTAR = 0.32      # distancia normalizada al juntar ambos puños para activar comparador
+
+QUIZ_SOSTENER = 1.2                # s señalando un astro para confirmar respuesta en Modo Quiz
+QUIZ_FEEDBACK = 2.4                # s mostrando "¡Correcto!" o la pista antes de la siguiente pregunta
 
 # ----------------------------------------------------------------------
 # Sol y planetas (esferas con textura, en su posicion real)

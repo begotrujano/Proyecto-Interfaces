@@ -137,6 +137,8 @@ class Mano:
         self.estirados = 3
         self.puno = False
         self.ok = False
+        self.indice = None               
+        self.senalando = False
         self._on = self._off = None
         self.p_izq = 0.5                 # probabilidad (suavizada) de ser la mano izquierda
         self.rol = None                  # 'izq' | 'der'
@@ -160,6 +162,7 @@ class Mano:
         cruda = np.asarray(norm)[list(PALMA)].mean(axis=0)
         self.norm = self.f_pts(norm, t)
         self.palma = self.norm[list(PALMA)].mean(axis=0)
+        self.indice = self.norm[8].copy()
         self._palma_cruda = cruda
         if previa is not None:
             dt = max(t - previa[2], 1e-3)
@@ -182,6 +185,11 @@ class Mano:
         else:
             self.ok = (self.ratio_ok < C.OK_ON and est >= C.OK_DEDOS_MIN
                        and not self.puno and quieta)
+                    
+        p_pose = _puntos_pose(norm, world, ancho, alto)
+        muneca = p_pose[0]
+        r_indice = float(np.linalg.norm(p_pose[8] - muneca) / max(np.linalg.norm(p_pose[5] - muneca), 1e-9))
+        self.senalando = (r_indice > 1.60 and est == 0 and not self.puno and not self.ok)
 
         if etiqueta in ("Left", "Right"):
             obs = score if etiqueta == "Left" else 1.0 - score

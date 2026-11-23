@@ -38,6 +38,7 @@ from universo.reloj import Reloj
 from universo.viaje import Selector, Viaje
 from universo import astros as A
 from universo import sistema as S
+from universo.modos import ComparadorTamanos, CorteTransversal, MenuGestos, ModoQuiz, SimuladorGravedad
 
 TITULO = "Universo en tus manos"
 NOMBRES = S.NOMBRES
@@ -287,6 +288,11 @@ class Aplicacion:
         self._fecha = self.reloj.fecha(time.perf_counter())
         self.ver_ficha = None             # tecla D: True = ficha fija, False = oculta, None = al llegar y se desvanece
         self._ficha_t0 = time.perf_counter()              # al arrancar se ve la de la Tierra
+        self.comparador = ComparadorTamanos()
+        self.gravedad = SimuladorGravedad()
+        self.corte = CorteTransversal()
+        self.quiz = ModoQuiz()
+        self.menu = MenuGestos()
 
     def iniciar(self):
         self.captura.start()
@@ -318,12 +324,25 @@ class Aplicacion:
         seleccion = self._elegir_astro(est, t)
         if self.viaje is not None and self.viaje.terminado(t):
             self._llegar()
-        if self.suave.log_escala is None:                 # cambio de vista dentro de este cuadro: toma el estado nuevo
-            est = self.control.instantanea(t)
-            self.suave.paso(est.log_escala, est.giro, est.inclinacion, dt)
         r = self._raton
         bajo = None if (r["abajo"] or r["x"] < 0 or self.viaje is not None) else self._astro_bajo(r["x"], r["y"])
         self.escena.resaltado = (self.escena.astros["objetivos"][bajo] + (bajo,)) if bajo else None
+        objetivos = self.escena.astros.get("objetivos", {})
+        self.comparador.actualizar(est, objetivos, self.modo, t)
+        self.gravedad.actualizar(est, self.foco, dt, t, self._dim[0], self._dim[1])
+        self.corte.actualizar(est, self.modo, self.viaje)
+        self.quiz.actualizar(est, objetivos, self._dim[0], self._dim[1], t)
+        accion_menu = self.menu.actualizar(
+            est, self.modo, self.comparador, self.gravedad, self.corte, self.quiz,
+            self.viaje, self._dim[0], self._dim[1], t
+        )
+        if accion_menu:
+            self._accion_menu(accion_menu, t)
+        if self.suave.log_escala is None:                 # cambio de vista dentro de este cuadro: toma el estado nuevo
+            est = self.control.instantanea(t)
+            self.suave.paso(est.log_escala, est.giro, est.inclinacion, dt)
+        info["modos"] = (self.corte, self.gravedad, self.comparador, self.quiz)
+        info["menu"] = self.menu
         return self.escena.componer(self.suave.log_escala, self.suave.giro, est, info,
                                     self.captura.frame, self.ver_camara, self.ver_info, t,
                                     self.suave.inclinacion, fecha=self._fecha, foco=self.foco, viaje=self.viaje,
@@ -333,6 +352,9 @@ class Aplicacion:
     # Cambiar de astro: en pausa, palma encima del astro -> anillo blanco -> viaje
     # ------------------------------------------------------------------
     def _elegir_astro(self, est, t):
+        if self.quiz.activo or self.comparador.activo or self.menu.hover_id is not None:
+            self.selector.reiniciar()
+            return None
         if est.activo or self.viaje is not None:
             self.selector.reiniciar()
             return None
@@ -393,6 +415,15 @@ class Aplicacion:
     def clic(self, x, y):
         """Clic sobre un astro: viajar a el. En la vista del sistema, sobre el astro actual = volver."""
         if self.viaje is not None:
+            return
+        bid = self.menu.boton_en(x, y)
+        if bid is not None:
+            self._accion_menu(bid, time.perf_counter())
+            return
+        if self.quiz.activo:
+            elegido = self._astro_bajo(x, y)
+            if elegido:
+                self.quiz.responder(elegido, time.perf_counter())
             return
         elegido = self._astro_bajo(x, y)
         if elegido is None:
@@ -464,12 +495,45 @@ class Aplicacion:
         self.suave.giro, self.suave.inclinacion = giro, incl
 
     def opacidad_ficha(self, t):
-        """1 mientras se lee la ficha del astro, luego se desvanece en 1 s (salvo que se fije con D)."""
+        """1 mientras se lee la ficha del astro, luego se desvanece suavemente en 2.5 s (salvo que se fije con D)."""
         if self.ver_ficha is not None:
             return 1.0 if self.ver_ficha else 0.0
-        return float(min(max(1.0 - (t - self._ficha_t0 - C.FICHA_DURACION), 0.0), 1.0))
+        return float(min(max(1.0 - (t - self._ficha_t0 - C.FICHA_DURACION) / 2.5, 0.0), 1.0))
+
+    def _accion_menu(self, accion, t):
+        if accion == "sistema":
+            self.comparador.cerrar()
+            self.quiz.cerrar()
+            self.alternar_sistema(t)
+        elif accion == "comparar":
+            self.quiz.cerrar()
+            self.comparador.alternar_demo(self.foco)
+            if self.comparador.activo:
+                self.comparador._t_inicio = t
+        elif accion == "otro_par":
+            self.comparador.siguiente_par()
+            self.comparador._t_inicio = t
+        elif accion == "gravedad":
+            self.gravedad.alternar(self._dim[0], self._dim[1], t)
+        elif accion == "peso_mas":
+            self.gravedad.cambiar_peso(5.0)
+        elif accion == "peso_menos":
+            self.gravedad.cambiar_peso(-5.0)
+        elif accion == "corte":
+            self.corte.alternar_manual()
+        elif accion == "quiz":
+            self.comparador.cerrar()
+            if self.quiz.activo:
+                self.quiz.cerrar()
+                self.control.avisar("Quiz terminado")
+            else:
+                if self.modo != "sistema":
+                    self.alternar_sistema(t)
+                self.quiz.iniciar()
+                self.control.avisar("¡Modo Quiz activado!")
 
     def tecla(self, k):
+        t = time.perf_counter()
         if k == ord(" "):
             self.control.alternar_activo()
         elif k == ord("v"):
@@ -480,19 +544,21 @@ class Aplicacion:
             with self.control.lock:
                 self.control.reiniciar()
             self.foco, self.viaje, self.modo = "tierra", None, "astro"
-            self.reloj.congelar(time.perf_counter(), False)
+            self.comparador.cerrar()
+            self.quiz.cerrar()
+            self.reloj.congelar(t, False)
             self.suave.reiniciar()
         elif k == ord("s"):
-            self.alternar_sistema(time.perf_counter())
+            self._accion_menu("sistema", t)
         elif k == ord("i"):
             self.control.intercambiar_manos()
         elif k in (ord("."), ord(",")):                   # control del tiempo
-            self.control.avisar(self.reloj.paso(1 if k == ord(".") else -1, time.perf_counter()).capitalize())
+            self.control.avisar(self.reloj.paso(1 if k == ord(".") else -1, t).capitalize())
         elif k == ord("d"):                               # ficha educativa: fija <-> oculta
-            self.ver_ficha = not (self.opacidad_ficha(time.perf_counter()) > 0.5)
+            self.ver_ficha = not (self.opacidad_ficha(t) > 0.5)
             self.control.avisar("Ficha fija" if self.ver_ficha else "Ficha oculta")
         elif k == ord("t"):
-            self.reloj.ahora(time.perf_counter())
+            self.reloj.ahora(t)
             self.control.avisar("Ahora mismo, en tiempo real")
         elif k in (ord("["), ord("]"), ord("e")) and hasattr(self.captura, "cambiar_exposicion"):
             self.captura.cambiar_exposicion(None if k == ord("e") else (-1 if k == ord("[") else 1))
@@ -500,6 +566,20 @@ class Aplicacion:
             texto = ("Exposición automática" if exp is None
                      else f"Exposición {exp:+.0f}  (1/{2 ** -exp:.0f} s)")
             self.control.avisar(texto)
+        elif k == ord("c"):                               # comparador de tamaños
+            self._accion_menu("comparar", t)
+        elif k == ord("n") and self.comparador.activo:    # siguiente par en el comparador
+            self._accion_menu("otro_par", t)
+        elif k == ord("g"):                               # gravedad / "¿Cuánto pesarías aquí?"
+            self._accion_menu("gravedad", t)
+        elif k in (ord("+"), ord("=")):
+            self._accion_menu("peso_mas", t)
+        elif k == ord("-"):
+            self._accion_menu("peso_menos", t)
+        elif k == ord("x"):                               # corte transversal
+            self._accion_menu("corte", t)
+        elif k == ord("k"):                               # modo quiz
+            self._accion_menu("quiz", t)
 
     def correr(self, pantalla_completa=False):
         cv2.namedWindow(TITULO, cv2.WINDOW_NORMAL)
