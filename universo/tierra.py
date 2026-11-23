@@ -21,6 +21,7 @@ Como se hace rapido:
 import functools
 import math
 import threading
+import time
 from pathlib import Path
 
 import cv2
@@ -77,24 +78,29 @@ def textura_procedural(ancho=1024, semilla=7):
     return (np.clip(col, 0, 1) * 255).astype(np.uint8).reshape(alto, ancho, 3)
 
 
-def _leer(ruta):
-    """Imagen BGR o None. Rutas relativas a la carpeta del proyecto."""
+def _leer(ruta, reducida=False):
+    """Imagen BGR o None. Rutas relativas a la carpeta del proyecto.
+    reducida: el JPEG se decodifica a 1/4 de ancho (libjpeg lo hace casi gratis: ~5x mas rapido)."""
     if not ruta:
         return None
     p = Path(ruta)
     p = p if p.is_absolute() else C.RAIZ / p
     if not p.is_file():
         return None
-    return cv2.imdecode(np.fromfile(str(p), np.uint8), cv2.IMREAD_COLOR)   # rutas con acentos
+    modo = cv2.IMREAD_REDUCED_COLOR_4 if reducida else cv2.IMREAD_COLOR
+    return cv2.imdecode(np.fromfile(str(p), np.uint8), modo)   # (fromfile: rutas con acentos)
 
 
-def cargar_textura(ruta, respaldo=None):
+def cargar_textura(ruta, respaldo=None, ancho_max=None):
     """Equirectangular BGR (ancho = 2 x alto). `ruta` puede ser una lista (se usa la primera que
-    exista, p. ej. la de la NASA y luego la procedural). Si no hay ninguna: respaldo() o un planeta inventado."""
+    exista, p. ej. la de la NASA y luego la procedural). Si no hay ninguna: respaldo() o un planeta inventado.
+    ancho_max: version chica (iconos); se lee reducida y se encoge a ese ancho."""
     rutas = ruta if isinstance(ruta, (list, tuple)) else [ruta]
     for r in rutas:
-        img = _leer(r)
+        img = _leer(r, reducida=bool(ancho_max) and ancho_max <= 1024)
         if img is not None:
+            if ancho_max and img.shape[1] > ancho_max:
+                img = cv2.resize(img, (ancho_max, ancho_max // 2), interpolation=cv2.INTER_AREA)
             return img, Path(r).name
     if respaldo is not None:
         return respaldo(), "procedural"
@@ -250,14 +256,14 @@ def iluminar_textura(dia, mar, noche, sol_tierra, ocaso_naranja=True, emisivo=Fa
 # ----------------------------------------------------------------------
 class Tierra:
     def __init__(self, ruta_textura=None, R=600, ruta_noche=None, atmosfera=True, emisivo=False,
-                 color_atm=None, oceanos=True, desfase_lon=0.0, respaldo=None):
+                 color_atm=None, oceanos=True, desfase_lon=0.0, respaldo=None, ancho_max=None):
         """emisivo: el Sol (brilla por si mismo, se oscurece hacia el borde, halo calido).
         oceanos=False: sin reflejo del Sol (Luna, Marte). desfase_lon: grados que se gira la textura
         si su longitud 0 no esta al centro de la imagen. respaldo: funcion que la genera si no hay archivo."""
         self.atmosfera = atmosfera                        # la Luna no tiene: ni halo azul ni ocaso naranja
         self.emisivo = emisivo
         self._atm = np.array(ATM if color_atm is None else color_atm, np.float32)
-        bgr, self.origen = cargar_textura(ruta_textura, respaldo)
+        bgr, self.origen = cargar_textura(ruta_textura, respaldo, ancho_max)
         if bgr.shape[1] != 2 * bgr.shape[0]:
             bgr = cv2.resize(bgr, (2 * bgr.shape[0], bgr.shape[0]), interpolation=cv2.INTER_AREA)
         if desfase_lon:
@@ -280,6 +286,9 @@ class Tierra:
         self._sol_horneado = None
         self._hilo = None
         self._lock_primera = threading.Lock()
+        self._sol_pedido = None                           # ultimo Sol pedido (para detectar saltos de fecha)
+        self._ultimo_sincrono = -1e9
+        self._paso_anterior = 0.0
 
     # ------------------------------------------------------------------
     def iluminar(self, sol_tierra, esperar=False):
@@ -290,17 +299,27 @@ class Tierra:
         if self.texturas is None:                         # primera vez: hornear ya, o esperar a otro hilo
             with self._lock_primera:                      # (p. ej. el precalentado) que ya este en ello;
                 if self.texturas is None:                 # si no, dibujar() veria texturas = None
-                    self._sol_horneado = s
+                    self._sol_horneado = self._sol_pedido = s
                     lit = iluminar_textura(self._dia, self._mar, self._noche, s, self.atmosfera, self.emisivo)
                     self.texturas = _piramide(lit)
             return
         if self.emisivo:
             return
+        paso = 0.0 if self._sol_pedido is None else math.degrees(math.acos(float(np.clip(s @ self._sol_pedido, -1, 1))))
+        # salto = cambio brusco tras un movimiento suave (cambio de fecha); con el tiempo muy acelerado
+        # todos los pasos son grandes y eso NO es un salto (se sigue horneando en el otro hilo)
+        salto = paso > C.SOL_REHORNEAR_SINCRONO and self._paso_anterior < C.SOL_REHORNEAR_SINCRONO
+        self._sol_pedido, self._paso_anterior = s, paso
         if self._sol_horneado is not None:
             ang = math.degrees(math.acos(float(np.clip(s @ self._sol_horneado, -1, 1))))
             if ang < C.SOL_REHORNEAR_GRADOS:
                 return
-        esperar = esperar or self.texturas is None        # la primera vez no hay nada que mostrar aun
+            # salto grande de un cuadro al otro (p. ej. cambio de fecha): la luz vieja se veria mal, se hornea
+            # ya. Con el tiempo acelerado los saltos son seguidos: a lo mas uno cada SOL_REHORNEAR_SINCRONO_CADA s.
+            ahora = time.monotonic()
+            if salto and ahora - self._ultimo_sincrono > C.SOL_REHORNEAR_SINCRONO_CADA:
+                self._ultimo_sincrono = ahora
+                esperar = True
         if self._hilo is not None and self._hilo.is_alive():
             if not esperar:
                 return

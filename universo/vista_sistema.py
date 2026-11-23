@@ -15,6 +15,7 @@ import numpy as np
 
 from universo import astros as A
 from universo import config as C
+from universo import etiquetas as ET
 from universo import sistema as S
 from universo.cielo import sprite_sol
 
@@ -104,20 +105,17 @@ class VistaSistema:
             etiquetas.append((n, x, y, r, activo, float(np.linalg.norm(P))))
             if n == foco_o:
                 cv2.circle(buf, _p(x, y), int((r + 7) * 16), (255, 255, 255), 1, cv2.LINE_AA, 4)
-        puestas = []                                                    # etiquetas ya colocadas (para no encimar)
-        prioridad = {"sol": 0, foco_o: 1}
-        for n, x, y, r, activo, dist_ua in sorted(etiquetas, key=lambda k: (prioridad.get(k[0], 2 if k[4] else 3), k[5])):
-            if not (20 < x < w - 90 and 50 < y < h - 60):
-                continue
-            if any(abs(x - px) < 100 and abs(y - py) < 26 for px, py in puestas):
-                continue
-            puestas.append((x, y))
+        lista, discos = [], [(x, y, r) for _, x, y, r, _, _ in etiquetas]
+        for n, x, y, r, activo, dist_ua in etiquetas:
             if not activo and math.hypot(x - cx, y - cy) < 70:             # pendientes cerca del Sol: sin nombre (estorba)
                 continue
             col = COL_TEXTO if activo else COL_PENDIENTE
-            e.texto.dibujar(buf, S.NOMBRES[n], x + r + 8, y - 10, 15 if activo else 13, col, activo)
+            lineas = [(S.NOMBRES[n], 15 if activo else 13, col, activo)]
             if n != "sol":
-                e.texto.dibujar(buf, _ua(dist_ua) + " del Sol", x + r + 8, y + 8, 12, COL_TENUE if activo else COL_PENDIENTE)
+                lineas.append((_ua(dist_ua) + " del Sol", 12, COL_TENUE if activo else COL_PENDIENTE, False))
+            prioridad = 0.0 if n == "sol" else 1.0 if n == foco_o else (2.0 if activo else 10.0) + dist_ua / 100.0
+            lista.append(ET.Etiqueta([n], x, y, r, lineas, prioridad))
+        e.dibujar_etiquetas(lista, discos)
         return {"modo": "sistema", "camara": None, "foco": foco, "objetivos": objetivos, "hiper": 0.0,
                 "px_ua": s, "inclinacion_vista": math.degrees(tilt), "altitud_km": 0.0, "dist_km": {},
                 "luna_km": 0.0, "sol_km": 0.0, "sol_px": None}

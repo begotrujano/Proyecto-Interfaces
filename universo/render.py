@@ -14,9 +14,13 @@ from datetime import datetime, timezone
 from universo import astros as A
 from universo import sistema as S
 from universo import config as C
+from universo import etiquetas as ET
+from universo.fichas import FICHAS
+from universo.reloj import fecha_inicial, texto_velocidad
+from universo.carga import AstroBajoDemanda
 from universo.cielo import Cielo
 from universo.planetas import textura_marte, textura_mercurio, textura_sol, textura_venus
-from universo.tierra import Tierra
+from universo.tierra import Tierra, niveles_esfera
 from universo.vista_sistema import VistaSistema
 
 COL_IZQ = (40, 178, 255)        # BGR ambar   -> zoom
@@ -122,11 +126,18 @@ def _flecha(buf, cx, cy, ang, col, tam=7):
 
 # ----------------------------------------------------------------------
 def fecha_actual():
-    """La fecha del cielo: config.FECHA si esta fijada, si no, ahora mismo (UTC)."""
-    if C.FECHA:
-        f = datetime.fromisoformat(C.FECHA)
-        return f if f.tzinfo else f.replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc)
+    """La fecha del cielo si no se pasa otra: config.FECHA si esta fijada, si no, ahora mismo (UTC).
+    (La aplicacion usa un universo.reloj.Reloj, que puede ir mas rapido o hacia atras.)"""
+    return fecha_inicial()
+
+
+_MESES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
+
+
+def texto_fecha(f):
+    """'22 nov 2026 · 17:05' en la hora local de la computadora."""
+    f = f.astimezone()
+    return f"{f.day} {_MESES[f.month - 1]} {f.year} · {f.hour:02d}:{f.minute:02d}"
 
 
 NOMBRES = S.NOMBRES
@@ -149,12 +160,16 @@ class Escena:
         self.cielo = Cielo(ancho, alto, self.focal)
         self.tierra = Tierra(textura, ruta_noche=C.TEXTURA_NOCHE)
         self.luna = Tierra(C.TEXTURA_LUNA, R=300, atmosfera=False)
-        self.mercurio = Tierra(C.TEXTURA_MERCURIO, atmosfera=False, oceanos=False,
-                               desfase_lon=C.DESFASE_TEXTURA_MERCURIO, respaldo=lambda: textura_mercurio(2048))
-        self.venus = Tierra(C.TEXTURA_VENUS, oceanos=False, color_atm=C.COLOR_ATM_VENUS,  # atmosfera densa: halo
-                            desfase_lon=C.DESFASE_TEXTURA_VENUS, respaldo=lambda: textura_venus(1024))
-        self.marte = Tierra(C.TEXTURA_MARTE, atmosfera=False, oceanos=False, desfase_lon=C.DESFASE_TEXTURA_MARTE,
-                            respaldo=lambda: textura_marte(2048))
+        # planetas: se cargan bajo demanda (universo/carga.py); el atributo se llama como el planeta
+        self._foco_actual, self._destino = "tierra", None
+        bd = lambda nombre, ruta, generar, ancho, **kw: AstroBajoDemanda(
+            nombre, ruta, generar, S.COLORES[nombre], ancho, al_pedir=self._al_pedir, **kw)
+        self.mercurio = bd("mercurio", C.TEXTURA_MERCURIO, textura_mercurio, 2048, atmosfera=False, oceanos=False,
+                           desfase_lon=C.DESFASE_TEXTURA_MERCURIO)
+        self.venus = bd("venus", C.TEXTURA_VENUS, textura_venus, 1024, oceanos=False,     # atmosfera densa: halo
+                        color_atm=C.COLOR_ATM_VENUS, desfase_lon=C.DESFASE_TEXTURA_VENUS)
+        self.marte = bd("marte", C.TEXTURA_MARTE, textura_marte, 2048, atmosfera=False, oceanos=False,
+                        desfase_lon=C.DESFASE_TEXTURA_MARTE)
         self.sol = Tierra(C.TEXTURA_SOL, emisivo=True, color_atm=C.COLOR_HALO_SOL,
                           desfase_lon=C.DESFASE_TEXTURA_SOL, respaldo=lambda: textura_sol(1024))
         self.texto = Texto()
@@ -165,11 +180,42 @@ class Escena:
         self.vista_sistema = VistaSistema(self)
         self._modo, self._fundido = "astro", None
         self.resaltado = None                              # (x, y, radio, nombre) del astro bajo el cursor del raton
-        threading.Thread(target=self._precalentar, daemon=True, name="precalentar").start()
+        self._ocupado = []                                 # zonas donde no van etiquetas (la ficha)
+        self._fichas_cache = {}
+        self._hilo_pre = threading.Thread(target=self._precalentar, daemon=True, name="precalentar")
+        self._hilo_pre.start()
+
+    def esperar_iconos(self):
+        """Espera a que esten las versiones chicas de todos los planetas (lo usan las pruebas)."""
+        self._hilo_pre.join()
+        for a in self._bajo_demanda():
+            a.preparar_chico(esperar=True)
+
+    def _bajo_demanda(self):
+        return [a for a in vars(self).values() if isinstance(a, AstroBajoDemanda)]
+
+    def preparar(self, nombre, esperar=False):
+        """Empieza a cargar la textura grande de un astro (al elegirlo como destino de un viaje)."""
+        a = getattr(self, nombre, None)
+        if isinstance(a, AstroBajoDemanda):
+            self._destino = nombre
+            a.preparar(esperar)
+
+    def _al_pedir(self, astro):
+        """Se pidio la version grande de un astro: si ya hay demasiadas, suelta las menos usadas
+        (nunca la del astro en foco ni la del destino del viaje)."""
+        protegidos = {astro.nombre, self._foco_actual, self._destino}
+        otros = [a for a in self._bajo_demanda() if a.pedido and a is not astro]
+        exceso = len(otros) + 1 - max(C.PLANETAS_EN_MEMORIA, 1)
+        libres = sorted((a for a in otros if a.nombre not in protegidos), key=lambda a: a.uso)
+        for a in libres[:max(exceso, 0)]:
+            a.liberar()
 
     def _precalentar(self):
-        """Hornea la luz de los planetas y del Sol al arrancar, para que el primer viaje no se trabe."""
+        """Hornea la luz del Sol y prepara las versiones chicas de los planetas (las grandes
+        se cargan cuando se necesitan: ver universo/carga.py)."""
         try:
+            niveles_esfera(600, False, True)               # tablas de las esferas sin atmosfera (Mercurio, Marte)
             jd = A.dia_juliano(fecha_actual())
             cuerpos = self._cuerpos(jd)
             for nombre in [n for n in C.PLANETAS_ACTIVOS if n != "tierra" and n in cuerpos] + ["sol"]:
@@ -184,6 +230,11 @@ class Escena:
                  inclinacion=None, fecha=None, foco="tierra", viaje=None, seleccion=None, modo="astro"):
         if inclinacion is None:
             inclinacion = estado.inclinacion
+        self._foco_actual = foco                          # para no liberar su textura (carga bajo demanda)
+        ficha = info.get("ficha")                          # (nombre, opacidad): ficha educativa del astro
+        ficha_visible = ficha is not None and modo == "astro" and viaje is None and ficha[1] > 0.01
+        self._ocupado = [self._ficha_diseno(ficha[0])[0]] if ficha_visible and ficha[0] in FICHAS else []
+        self._destino = viaje.nombre if viaje is not None else None
         if modo != self._modo:                             # fundido entre la vista de un astro y la del sistema
             self._fundido = (self.buf.copy(), t)
             self._modo = modo
@@ -205,6 +256,8 @@ class Escena:
         self._manos(estado)
         if ver_camara and frame is not None:
             self._camara(frame, estado)
+        if ficha_visible:
+            self._ficha(*ficha)
         self._hud(log_escala, giro, inclinacion, estado, info, ver_info, modo)
         self._avisos(estado, t)
         if self._fundido is not None:
@@ -228,8 +281,9 @@ class Escena:
         }
         for nombre in C.PLANETAS_ACTIVOS:                  # los demas planetas: ver config.PLANETAS_ACTIVOS
             if nombre in S.FISICOS:
+                capa = "nubes" if (nombre == "venus" and C.VENUS_NUBES_SUPERROTAN) else None
                 cuerpos[nombre] = (S.posicion(nombre, jd), S.radio_rt(nombre), getattr(self, nombre),
-                                   S.rotacion(nombre, jd))
+                                   S.rotacion(nombre, jd, capa))
         return cuerpos
 
     def camara(self, log_escala, giro, inclinacion, foco, jd, cuerpos=None):
@@ -305,15 +359,107 @@ class Escena:
     def _sistema(self, log_escala, giro, inclinacion, fecha, foco):
         self.astros = self.vista_sistema.dibujar(self.buf, A.dia_juliano(fecha), log_escala, giro, inclinacion, foco)
 
+    def medir_texto(self, texto, tam, negrita):
+        alfa = self.texto.sello(texto, tam, COL_TEXTO, negrita)[1]
+        return alfa.shape[1], alfa.shape[0]
+
+    def dibujar_etiquetas(self, etiquetas, discos):
+        """Acomoda (universo/etiquetas.py) y dibuja etiquetas de astros sin que se encimen."""
+        for e in ET.colocar(ET.agrupar(etiquetas), self.medir_texto, self.w, self.h, discos, (8, 72, 8, 78),
+                            cajas=self._ocupado):
+            for (texto, tam, col, neg), (x, y) in zip(e.lineas, e.pos):
+                self.texto.dibujar(self.buf, texto, x, y, tam, col, neg)
+
     def _etiquetas(self):
-        a, T = self.astros, self.texto
-        dentro = lambda x, y: 0 <= x < self.w - 60 and 60 <= y < self.h - 60
+        a = self.astros
+        etiquetas, discos = [], []
         for nombre, (x, y, r) in a["objetivos"].items():
-            if nombre == a["foco"] or not dentro(x, y):
-                continue
-            dx = max(r, 4.0) + 10
-            T.dibujar(self.buf, NOMBRES.get(nombre, nombre), x + dx, y - 9, 15, COL_TEXTO, True)
-            T.dibujar(self.buf, _km(a["dist_km"].get(nombre, 0.0)), x + dx, y + 10, 12, COL_TENUE)
+            if nombre == a["foco"]:
+                continue                                    # (el astro en foco puede quedar debajo de una etiqueta)
+            dist = a["dist_km"].get(nombre, 0.0)
+            discos.append((x, y, max(r, 3.0)))
+            etiquetas.append(ET.Etiqueta([nombre], x, y, r, [(NOMBRES.get(nombre, nombre), 15, COL_TEXTO, True),
+                                                             (_km(dist), 12, COL_TENUE, False)],
+                                         0.0 if nombre == "sol" else 1.0 + dist / 1e12))
+        self.dibujar_etiquetas(etiquetas, discos)
+
+    def _envolver(self, texto, tam, ancho):
+        """Parte un texto en renglones que caben en `ancho` px."""
+        renglones, actual = [], ""
+        for palabra in texto.split():
+            prueba = (actual + " " + palabra).strip()
+            if actual and self.medir_texto(prueba, tam, False)[0] > ancho:
+                renglones.append(actual)
+                actual = palabra
+            else:
+                actual = prueba
+        return renglones + ([actual] if actual else [])
+
+    def _ficha_diseno(self, nombre):
+        """-> (caja (x0, y0, x1, y1), renglones) de la ficha de un astro. Se calcula una vez."""
+        if nombre in self._fichas_cache:
+            return self._fichas_cache[nombre]
+        f = FICHAS[nombre]
+        W, pad = C.FICHA_ANCHO, 14
+        col = max(self.medir_texto(e, 13, False)[0] for e, _ in f["filas"]) + 14
+        filas = [(e, self._envolver(v, 13, W - 2 * pad - col)) for e, v in f["filas"]]
+        tipo = self._envolver(f["tipo"], 13, W - 2 * pad)
+        dato = self._envolver(f["dato"], 13, W - 2 * pad)
+        alto = pad + 30 + 18 * len(tipo) + 8 + sum(19 * len(v) + 3 for _, v in filas) + 8 + 18 * len(dato) + pad
+        x0, y1 = 20, self.h - 92
+        caja = (x0, max(y1 - alto, 80), x0 + W, y1)
+        self._fichas_cache[nombre] = (caja, (col, tipo, filas, dato))
+        return self._fichas_cache[nombre]
+
+    def _ficha_sprite(self, nombre):
+        """La ficha ya compuesta, una vez por astro: (1 - alfa) y color premultiplicado (float32).
+        Se dibuja sobre negro y sobre blanco: de la diferencia sale la transparencia de cada pixel."""
+        clave = ("sprite", nombre)
+        if clave not in self._fichas_cache:
+            (x0, y0, x1, y1), _ = self._ficha_diseno(nombre)
+            negro = np.zeros((y1 - y0, x1 - x0, 3), np.uint8)
+            blanco = np.full_like(negro, 255)
+            for lienzo in (negro, blanco):
+                self._ficha_en(lienzo, nombre)
+            inv = (blanco.astype(np.float32) - negro.astype(np.float32)) / 255.0
+            self._fichas_cache[clave] = (inv, negro.astype(np.float32))
+        return self._fichas_cache[clave]
+
+    def _ficha_en(self, lienzo, nombre):
+        """Dibuja la ficha sobre un lienzo del tamano del panel."""
+        _, (col, tipo, filas, dato) = self._ficha_diseno(nombre)
+        pad, T = 14, self.texto
+        cv2.addWeighted(lienzo, 0.38, np.full_like(lienzo, (22, 16, 12)), 0.62, 0, dst=lienzo)
+        cv2.rectangle(lienzo, (0, 0), (lienzo.shape[1] - 1, lienzo.shape[0] - 1), (90, 80, 70), 1, cv2.LINE_AA)
+        y = pad
+        T.dibujar(lienzo, NOMBRES.get(nombre, nombre), pad, y, 22, COL_TEXTO, True)
+        y += 30
+        for renglon in tipo:
+            T.dibujar(lienzo, renglon, pad, y, 13, COL_DER)
+            y += 18
+        y += 8
+        for etiqueta, valor in filas:
+            T.dibujar(lienzo, etiqueta, pad, y, 13, COL_TENUE)
+            for renglon in valor:
+                T.dibujar(lienzo, renglon, pad + col, y, 13, COL_TEXTO)
+                y += 19
+            y += 3
+        y += 8
+        for renglon in dato:
+            T.dibujar(lienzo, renglon, pad, y, 13, COL_IZQ)
+            y += 18
+
+    def _ficha(self, nombre, opacidad=1.0):
+        """Ficha educativa (universo/fichas.py) abajo a la izquierda, sobre un panel translucido."""
+        if nombre not in FICHAS:
+            return
+        (x0, y0, x1, y1), _ = self._ficha_diseno(nombre)
+        inv, pre = self._ficha_sprite(nombre)
+        roi = self.buf[y0:y1, x0:x1]
+        if opacidad < 0.999:                               # desvaneciendose: mezcla con la opacidad
+            inv = 1.0 - opacidad * (1.0 - inv)
+            pre = pre * opacidad
+        roi[:] = cv2.convertScaleAbs(cv2.add(cv2.multiply(roi.astype(np.float32), inv), pre))
 
     def _seleccion(self, sel):
         """Anillo blanco semitransparente que se llena al dejar la palma sobre un astro."""
@@ -428,6 +574,12 @@ class Escena:
             T.dibujar(b, f"{NOMBRES.get(self.astros.get('foco', 'tierra'), '')}   ·   Altitud {_km(alt)}   ·   "
                          f"Sobre {abs(lat):.0f}° {hemi}, {abs(lon):.0f}° {lado}", 20, 48, 16, COL_TEXTO)
 
+        reloj = info.get("reloj")                          # (fecha, velocidad): el control del tiempo
+        if reloj is not None:
+            f, v = reloj
+            T.dibujar(b, f"{texto_fecha(f)}   ·   {texto_velocidad(v)}", self.w - 16, 48, 15,
+                      COL_TENUE if v == 1 else COL_IZQ, v != 1, ancla="d")
+
         if ver_info:
             exp = info.get("exposicion")
             T.dibujar(b, f"dibujo {info['fps_render']:.0f} fps  ·  cámara {info.get('fps_cam', 0):.0f} fps "
@@ -445,7 +597,8 @@ class Escena:
                           20, y, 13, COL_IZQ if v.rol == "izq" else COL_DER)
                 y += 19
             T.dibujar(b, "Espacio activar/pausar · R reiniciar · I intercambiar manos · V cámara · "
-                         "S sistema solar · [ ] exposición · H info · F pantalla completa · Q salir", self.w - 16, 22, 13, COL_TENUE, ancla="d")
+                         "S sistema solar · , . tiempo · T ahora · D ficha · [ ] exposición · H info · F pantalla completa · Q salir",
+                      self.w - 16, 22, 13, COL_TENUE, ancla="d")
 
         if estado.activo:
             msg = ("Izquierda: puño y sube o baja = zoom     ·     Derecha: swipe a los lados = girar, "

@@ -34,6 +34,7 @@ from universo import config as C
 from universo.control import Control
 from universo.manos import SeguidorManos
 from universo.render import Escena, fecha_actual
+from universo.reloj import Reloj
 from universo.viaje import Selector, Viaje
 from universo import astros as A
 from universo import sistema as S
@@ -282,6 +283,10 @@ class Aplicacion:
         self.viaje = None
         self.modo = "astro"               # "astro" (orbitando un astro) o "sistema" (todo el Sistema Solar)
         self._guardado = None             # (zoom, giro, inclinacion) del astro mientras ves el sistema
+        self.reloj = Reloj(time.perf_counter())           # la fecha del cielo (teclas , . T)
+        self._fecha = self.reloj.fecha(time.perf_counter())
+        self.ver_ficha = None             # tecla D: True = ficha fija, False = oculta, None = al llegar y se desvanece
+        self._ficha_t0 = time.perf_counter()              # al arrancar se ve la de la Tierra
 
     def iniciar(self):
         self.captura.start()
@@ -304,9 +309,12 @@ class Aplicacion:
         self.control.avanzar(t)
         est = self.control.instantanea(t)
         self.suave.paso(est.log_escala, est.giro, est.inclinacion, dt)
+        self._fecha = self.reloj.fecha(t)
         info = {"fps_render": self.fps_render, "fps_det": self.deteccion.fps, "lat_ms": self.deteccion.lat_ms,
                 "fps_cam": getattr(self.captura, "fps", 0.0),
-                "exposicion": getattr(self.captura, "exposicion", None)}
+                "exposicion": getattr(self.captura, "exposicion", None),
+                "reloj": (self._fecha, 0.0 if self.reloj.congelado else self.reloj.velocidad),
+                "ficha": (self.foco, self.opacidad_ficha(t))}
         seleccion = self._elegir_astro(est, t)
         if self.viaje is not None and self.viaje.terminado(t):
             self._llegar()
@@ -318,7 +326,7 @@ class Aplicacion:
         self.escena.resaltado = (self.escena.astros["objetivos"][bajo] + (bajo,)) if bajo else None
         return self.escena.componer(self.suave.log_escala, self.suave.giro, est, info,
                                     self.captura.frame, self.ver_camara, self.ver_info, t,
-                                    self.suave.inclinacion, foco=self.foco, viaje=self.viaje,
+                                    self.suave.inclinacion, fecha=self._fecha, foco=self.foco, viaje=self.viaje,
                                     seleccion=seleccion, modo=self.modo)
 
     # ------------------------------------------------------------------
@@ -419,7 +427,10 @@ class Aplicacion:
         self.selector.reiniciar()
 
     def _viajar(self, destino, t):
-        jd = A.dia_juliano(fecha_actual())
+        self.escena.preparar(destino)                    # la textura grande se carga mientras dura el viaje
+        self.reloj.congelar(t)                           # el destino no se mueve mientras viajas
+        self._fecha = self.reloj.fecha(t)
+        jd = A.dia_juliano(self._fecha)
         cuerpos = self.escena._cuerpos(jd)
         if self.modo == "sistema":                       # sales de la vista del sistema: llegas con zoom x1
             esc, giro, incl = self._guardado or (0.0, self.suave.giro, self.suave.inclinacion)
@@ -445,10 +456,18 @@ class Aplicacion:
         v = self.viaje
         self.viaje = None
         self.foco = v.nombre
-        rot = self.escena._cuerpos(A.dia_juliano(fecha_actual()))[v.nombre][3]
+        rot = self.escena._cuerpos(A.dia_juliano(self._fecha))[v.nombre][3]
+        self.reloj.congelar(time.perf_counter(), False)
+        self._ficha_t0 = time.perf_counter()              # muestra la ficha del astro al que llegaste
         giro, incl = A.giro_inclinacion(rot @ v.dir_final)
         self.control.colocar(giro, incl)
         self.suave.giro, self.suave.inclinacion = giro, incl
+
+    def opacidad_ficha(self, t):
+        """1 mientras se lee la ficha del astro, luego se desvanece en 1 s (salvo que se fije con D)."""
+        if self.ver_ficha is not None:
+            return 1.0 if self.ver_ficha else 0.0
+        return float(min(max(1.0 - (t - self._ficha_t0 - C.FICHA_DURACION), 0.0), 1.0))
 
     def tecla(self, k):
         if k == ord(" "):
@@ -461,11 +480,20 @@ class Aplicacion:
             with self.control.lock:
                 self.control.reiniciar()
             self.foco, self.viaje, self.modo = "tierra", None, "astro"
+            self.reloj.congelar(time.perf_counter(), False)
             self.suave.reiniciar()
         elif k == ord("s"):
             self.alternar_sistema(time.perf_counter())
         elif k == ord("i"):
             self.control.intercambiar_manos()
+        elif k in (ord("."), ord(",")):                   # control del tiempo
+            self.control.avisar(self.reloj.paso(1 if k == ord(".") else -1, time.perf_counter()).capitalize())
+        elif k == ord("d"):                               # ficha educativa: fija <-> oculta
+            self.ver_ficha = not (self.opacidad_ficha(time.perf_counter()) > 0.5)
+            self.control.avisar("Ficha fija" if self.ver_ficha else "Ficha oculta")
+        elif k == ord("t"):
+            self.reloj.ahora(time.perf_counter())
+            self.control.avisar("Ahora mismo, en tiempo real")
         elif k in (ord("["), ord("]"), ord("e")) and hasattr(self.captura, "cambiar_exposicion"):
             self.captura.cambiar_exposicion(None if k == ord("e") else (-1 if k == ord("[") else 1))
             exp = self.captura.exposicion

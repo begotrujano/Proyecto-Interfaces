@@ -31,6 +31,9 @@ TECLAS
   Espacio activar/pausar   S sistema solar completo (y volver)
   R reiniciar   I intercambiar manos   V camara
   H informacion de depuracion   F pantalla completa   Q o Esc salir
+  .  el tiempo corre mas rapido (1 min/s, 1 h/s, 1 dia/s, 1 semana/s, 1 mes/s)
+  ,  mas lento, se detiene o va hacia atras     T  volver al ahora
+  D  ficha del astro: dejarla fija u ocultarla
 
 SI ALGO NO SE SIENTE BIEN -> universo\config.py (tiene la guia al inicio)
   Con la tecla H ves en vivo los numeros de cada mano:
@@ -72,6 +75,9 @@ MERCURIO, VENUS, MARTE, EL SOL Y EL SISTEMA SOLAR
   - Tecla S: ves todo el Sistema Solar desde arriba. Zoom con la mano izquierda, gira o
     inclina la vista con la derecha. Palma sobre un astro = viajar a el; sobre el astro donde
     estabas (o S otra vez) = volver.
+  - Al llegar a un astro aparece su ficha con datos reales (NASA) unos segundos.
+  - Con el tiempo acelerado (tecla .) se ven girar los planetas en sus orbitas, cambiar
+    la fase de Venus y pasar el dia y la noche. La fecha y la velocidad salen arriba a la derecha.
   - Para las texturas reales (NASA y Solar System Scope): python herramientas\descargar_texturas.py
 
 LO QUE VES ES REAL

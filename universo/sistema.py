@@ -26,7 +26,7 @@ ORDEN = ["mercurio", "venus", "tierra", "marte", "jupiter", "saturno", "urano", 
 NOMBRES = {"sol": "Sol", "mercurio": "Mercurio", "venus": "Venus", "tierra": "Tierra", "luna": "Luna",
            "marte": "Marte", "jupiter": "Júpiter", "saturno": "Saturno", "urano": "Urano", "neptuno": "Neptuno"}
 ARTICULOS = {"sol": "el", "luna": "la", "tierra": "la"}   # "Viajando a la Luna", "a Marte" (sin articulo)
-COLORES = {"mercurio": (150, 150, 160), "venus": (175, 215, 240), "tierra": (230, 170, 90),
+COLORES = {"mercurio": (105, 160, 210), "venus": (175, 215, 240), "tierra": (230, 170, 90),
            "marte": (70, 110, 205), "jupiter": (150, 185, 215), "saturno": (150, 200, 225),
            "urano": (220, 225, 160), "neptuno": (230, 140, 80), "sol": (200, 235, 255), "luna": (200, 200, 200)}
 
@@ -57,7 +57,9 @@ FISICOS = {
     "sol": dict(radio_km=A.RADIO_SOL_KM, ra=(286.13, 0.0), dec=(63.87, 0.0), w=(84.176, 14.1844000)),
     "mercurio": dict(radio_km=2439.7, ra=(281.0097, -0.0328), dec=(61.4143, -0.0049), w=(329.5469, 6.1385025)),
     # Venus gira al reves (retrogrado): su meridiano 0 avanza hacia atras, una vuelta cada 243 dias
-    "venus": dict(radio_km=6051.8, ra=(272.76, 0.0), dec=(67.16, 0.0), w=(160.20, -1.4813688)),
+    "venus": dict(radio_km=6051.8, ra=(272.76, 0.0), dec=(67.16, 0.0), w=(160.20, -1.4813688),
+                  # las nubes "superrotan": dan la vuelta en ~4 dias (vientos de ~100 m/s), en el mismo sentido
+                  w_nubes=(160.20, -360.0 / 4.0)),
     "marte": dict(radio_km=3389.5, ra=(317.68143, -0.1061), dec=(52.88650, -0.0609), w=(176.630, 350.89198226)),
 }
 
@@ -149,15 +151,17 @@ def posicion(nombre, jd):
     return geocentrica(nombre, jd)
 
 
-def rotacion(nombre, jd):
+def rotacion(nombre, jd, capa=None):
     """Matriz que pasa vectores del marco de la Tierra al marco del astro (x en su longitud 0,
-    z hacia su polo norte), segun los elementos de rotacion de la IAU."""
+    z hacia su polo norte), segun los elementos de rotacion de la IAU.
+    capa="nubes": la rotacion de su capa de nubes si gira distinto (Venus); si no, la de la superficie."""
     f = FISICOS[nombre]
     t = (jd - 2451545.0) / 36525.0
     d = jd - 2451545.0
     ra = (f["ra"][0] + f["ra"][1] * t) * _RAD
     dec = (f["dec"][0] + f["dec"][1] * t) * _RAD
-    W = ((f["w"][0] + f["w"][1] * d) % 360.0) * _RAD
+    w0, w1 = f.get("w_" + capa, f["w"]) if capa else f["w"]
+    W = ((w0 + w1 * d) % 360.0) * _RAD
     icrf_a_astro = _rz(W) @ _rx(math.pi / 2 - dec) @ _rz(math.pi / 2 + ra)
     return icrf_a_astro @ A.ecuatorial_a_tierra(jd).T
 

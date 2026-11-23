@@ -35,11 +35,15 @@ SUAVIZADO_TAU = 0.045              # s; suavizado visual (independiente de la ca
 # camara; zoom = que tan cerca). El Sol, la Luna y las estrellas estan donde estan de
 # verdad en este momento, asi que el lado de dia y el de noche son los reales.
 FECHA = None                       # None = ahora mismo; o un texto ISO, p. ej. "2024-04-08T18:17:00+00:00"
+# Control del tiempo (teclas . y , ; T = volver al ahora): segundos simulados por segundo real
+TIEMPO_PASOS = (-30 * 86400, -7 * 86400, -86400, -3600, -60, 0, 1, 60, 3600, 86400, 7 * 86400, 30 * 86400)
 CAMPO_VISION_V = 40.0              # grados de campo de vision vertical de la camara
 TEXTURA_NOCHE = "assets/tierra_nasa_blackmarble.jpg"   # luces de ciudades (NASA Black Marble 2016)
 BRILLO_LUCES = 1.25                # intensidad del lado de noche (luces y tierra a la luz de la Luna)
 SOL_REHORNEAR_GRADOS = 0.08        # la luz del dia/noche se recalcula (en otro hilo) cuando el Sol
                                    # se mueve esto respecto a la Tierra (0.25 grados por minuto)
+SOL_REHORNEAR_SINCRONO = 25.0      # si el Sol salta mas que esto de un cuadro al siguiente (cambio de fecha),
+SOL_REHORNEAR_SINCRONO_CADA = 0.5  # se hornea sin esperar al hilo (a lo mas una vez cada esto, en s)
 BRILLO_ESTRELLAS = 650.0           # brillo de una estrella de magnitud 1
 CONTRASTE_ESTRELLAS = 0.45         # <1 = las debiles se ven mas (1 = brillo fisico, casi no se ven)
 BRILLO_VIA_LACTEA = 0.26
@@ -49,6 +53,9 @@ BRILLO_LUNA = 0.85
 LUZ_TIERRA_EN_LUNA = 0.03          # "luz cenicienta": la Tierra ilumina un poco el lado oscuro
 TEXTURA_LUNA = "assets/luna_nasa_lroc.jpg"   # NASA SVS CGI Moon Kit (LRO), 4096x2048
 ETIQUETAS_ASTROS = True
+FICHA_DURACION = 9.0               # s que se ve la ficha educativa al llegar a un astro (tecla D: fijarla/ocultarla)
+FICHA_ANCHO = 380                  # px
+ETIQUETA_UNIR_PX = 14.0           # astros a menos de esto en pantalla comparten etiqueta ("Tierra · Luna")
 
 # ----------------------------------------------------------------------
 # Sol y planetas (esferas con textura, en su posicion real)
@@ -67,9 +74,14 @@ DESFASE_TEXTURA_SOL = 0.0
 DESFASE_TEXTURA_MERCURIO = 0.0     # igual que el de Marte (la procedural ya trae la longitud 0 al centro)
 DESFASE_TEXTURA_VENUS = 0.0
 COLOR_ATM_VENUS = (0.55, 0.86, 1.0)  # BGR del halo de Venus: bruma amarilla palida (a contraluz se enciende el anillo)
+VENUS_NUBES_SUPERROTAN = True      # las nubes de Venus dan la vuelta en ~4 dias (la superficie, en 243). False si usas la textura de Magellan
 BRILLO_SOL = 1.25                  # el Sol emite: >1 satura el centro a blanco; el borde queda anaranjado
 COLOR_HALO_SOL = (0.40, 0.75, 1.0) # BGR del halo junto al disco del Sol
 PLANETAS_ACTIVOS = ("mercurio", "venus", "tierra", "marte")   # los que ya se dibujan como esfera. Agrega uno al implementarlo.
+# Carga bajo demanda (universo/carga.py): Mercurio, Venus, Marte... no se cargan completos al arrancar
+PLANETAS_EN_MEMORIA = 3            # texturas grandes (~80 MB c/u) que se quedan cargadas; las demas se liberan
+ICONO_ANCHO = 512                  # px de ancho de la textura chica (iconos y planetas que se ven pequenos)
+ICONO_RADIO_MAX = 90.0             # px: hasta este radio en pantalla se dibuja con la textura chica
 PUNTO_ASTRO_MIN = 1.2              # radio (px) bajo el cual un planeta se dibuja como un punto brillante
 
 # ----------------------------------------------------------------------

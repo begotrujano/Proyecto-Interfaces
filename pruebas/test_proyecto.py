@@ -582,7 +582,8 @@ def test_sol_y_marte_en_escena():
     esc = Escena()
     est = Control().instantanea(0.0)
     fecha = _fecha(2026, 11, 22, 0, 33)
-    time.sleep(1.5)                                                # termina de hornear la luz de Marte
+    esc.esperar_iconos()
+    esc.preparar("marte", esperar=True)                            # (en la app lo pide el viaje)
     def cuadro(foco, giro=1.0, incl=0.0, le=0.0):
         for k in range(2):
             img = esc.componer(le, giro, est, {}, None, False, False, 0.0, incl, fecha, foco)
@@ -657,12 +658,21 @@ def test_mercurio_y_venus():
     x1 = inercial("venus", jd + 1.0).T @ np.array([1.0, 0.0, 0.0])
     polo = inercial("venus", jd).T @ np.array([0.0, 0.0, 1.0])
     assert np.cross(x0, x1) @ polo < 0                                # gira en sentido horario visto desde su polo norte
+    # sus nubes superrotan: una vuelta en ~4 dias, en el mismo sentido que la superficie
+    N1, N2 = S.rotacion("venus", jd, "nubes"), S.rotacion("venus", jd + 4.0, "nubes")
+    N1, N2 = N1 @ A.ecuatorial_a_tierra(jd), N2 @ A.ecuatorial_a_tierra(jd + 4.0)
+    assert np.degrees(np.arccos(np.clip((np.trace(N1 @ N2.T) - 1) / 2, -1, 1))) < 0.05
+    n0 = (S.rotacion("venus", jd, "nubes") @ A.ecuatorial_a_tierra(jd)).T @ np.array([1.0, 0.0, 0.0])
+    n1 = (S.rotacion("venus", jd + 0.5, "nubes") @ A.ecuatorial_a_tierra(jd + 0.5)).T @ np.array([1.0, 0.0, 0.0])
+    assert np.cross(n0, n1) @ polo < 0
+    assert np.allclose(S.rotacion("mercurio", jd, "nubes"), S.rotacion("mercurio", jd))   # sin nubes: la superficie
     # en la escena: esferas con textura, centradas y del tamano pedido; el lado del Sol es el brillante
     esc = Escena()
     est = Control().instantanea(0.0)
     fecha = _fecha(2026, 11, 22, 0, 33)
-    time.sleep(1.0)
+    esc.esperar_iconos()
     for n in ("mercurio", "venus"):
+        esc.preparar(n, esperar=True)
         c, _, _, rot = esc._cuerpos(jd)[n]
         sol = rot @ (A.sol_posicion(jd) - c)
         sol /= np.linalg.norm(sol)
@@ -705,6 +715,154 @@ def test_primer_horneado_entre_hilos():
     assert t.texturas is not None and buf.max() > 50
 
 
+def test_carga_bajo_demanda():
+    """Los planetas no se cargan completos al arrancar: solo su version chica. La grande se carga en
+    otro hilo al pedir un viaje (y llega antes que la camara), el dibujo nunca espera, y solo quedan
+    PLANETAS_EN_MEMORIA grandes (nunca se suelta la del astro en foco)."""
+    from universo import astros as A
+    from universo.render import Escena
+    esc = Escena()
+    esc.esperar_iconos()
+    planetas = esc._bajo_demanda()
+    assert {a.nombre for a in planetas} >= {"mercurio", "venus", "marte"}
+    assert all(a.chico is not None and not a.pedido for a in planetas)
+    assert all(a.chico._dia.shape[1] <= C.ICONO_ANCHO for a in planetas)
+    # dibujar un planeta grande sin haberlo pedido: no espera (disco o version chica) y pide la carga
+    est = Control().instantanea(0.0)
+    fecha = _fecha(2026, 11, 22, 0, 33)
+    esc.componer(0.0, 0.5, est, {}, None, False, False, 0.0, 0.2, fecha, "venus")      # (prepara tablas)
+    t0 = time.perf_counter()
+    esc.componer(0.0, 0.6, est, {}, None, False, False, 0.0, 0.2, fecha, "venus")
+    ms = (time.perf_counter() - t0) * 1000
+    print(f"  cuadro con Venus aun sin cargar: {ms:.0f} ms (version chica: {esc.venus.chico.origen})")
+    assert esc.venus.pedido and ms < 150
+    esc.preparar("venus", esperar=True)
+    assert esc.venus.lista
+    # limite de memoria: con 2, al pedir un tercero se suelta el menos usado, nunca el del foco
+    limite = C.PLANETAS_EN_MEMORIA
+    try:
+        C.PLANETAS_EN_MEMORIA = 2
+        esc.preparar("marte", esperar=True)
+        esc._foco_actual = "venus"                                 # venus: en foco (el menos usado, pero protegido)
+        esc.venus.uso, esc.marte.uso = 1.0, 2.0
+        esc._destino = None
+        esc.preparar("mercurio", esperar=True)
+        cargados = sorted(a.nombre for a in planetas if a.pedido)
+        print(f"  limite 2, foco en Venus, pido Mercurio -> cargados: {cargados}")
+        assert cargados == ["mercurio", "venus"] and esc.marte.grande is None and esc.marte.chico is not None
+    finally:
+        C.PLANETAS_EN_MEMORIA = limite
+    # el viaje pide la textura y esta lista mucho antes de llegar (el viaje dura VIAJE_DURACION s)
+    esc.marte.liberar()
+    t0 = time.perf_counter()
+    esc.preparar("marte")
+    while not esc.marte.lista and time.perf_counter() - t0 < C.VIAJE_DURACION:
+        time.sleep(0.01)
+    dt = time.perf_counter() - t0
+    print(f"  Marte cargado en {dt * 1000:.0f} ms (el viaje dura {C.VIAJE_DURACION:.1f} s)")
+    assert esc.marte.lista and dt < 0.6 * C.VIAJE_DURACION
+
+
+def test_reloj():
+    """Control del tiempo: escalones de velocidad hacia adelante y atras, congelar durante un viaje
+    y volver al ahora."""
+    from datetime import timedelta
+    from universo.reloj import Reloj, texto_velocidad
+    f0 = _fecha(2026, 11, 22, 12, 0)
+    r = Reloj(100.0, f0)
+    assert r.velocidad == 1 and r.fecha(110.0) == f0 + timedelta(seconds=10)
+    assert r.paso(1, 110.0) == "1 minuto por segundo"
+    assert r.fecha(111.0) == f0 + timedelta(seconds=10 + 60)         # sin saltos al cambiar de velocidad
+    for _ in range(2):
+        r.paso(1, 111.0)
+    assert r.velocidad == 86400 and texto_velocidad(r.velocidad) == "1 día por segundo"
+    assert r.fecha(112.0) - r.fecha(111.0) == timedelta(days=1)
+    for _ in range(20):                                               # hacia atras, hasta el tope
+        r.paso(-1, 112.0)
+    assert r.velocidad == C.TIEMPO_PASOS[0] < 0 and r.fecha(113.0) < r.fecha(112.0)
+    assert texto_velocidad(-86400) == "1 día por segundo, hacia atrás" and texto_velocidad(0) == "tiempo detenido"
+    for _ in range(5):
+        r.paso(1, 113.0)
+    assert r.velocidad == 0 and r.fecha(200.0) == r.fecha(113.0)      # detenido
+    r.fijar_velocidad(3600, 113.0)
+    a = r.fecha(114.0)
+    r.congelar(114.0)                                                  # durante un viaje: no avanza
+    assert r.fecha(120.0) == a and r.congelado
+    r.congelar(120.0, False)
+    assert r.fecha(121.0) == a + timedelta(hours=1)                    # sigue desde donde se quedo
+    r.ahora(121.0)
+    assert r.velocidad == 1 and abs((r.fecha(121.0) - __import__("universo.reloj", fromlist=["x"]).fecha_inicial()).total_seconds()) < 2
+
+
+def test_tiempo_en_la_aplicacion():
+    """Teclas , . T: el cielo usa la fecha del reloj (los planetas se mueven), el viaje lo congela."""
+    from universo import sistema as S
+    from main import Aplicacion, Captura
+    app = Aplicacion(Captura(FuenteFalsa().leer), DetectorGuion())
+    app.escena.esperar_iconos()
+    app.alternar_sistema()
+    app.paso_render()
+    x0 = app.escena.astros["objetivos"]["mercurio"][:2]
+    for _ in range(3):
+        app.tecla(ord("."))                                            # 1 min/s, 1 h/s, 1 dia/s
+    assert app.reloj.velocidad == 86400
+    app.reloj.fijar_velocidad(30 * 86400, time.perf_counter())         # que Mercurio se mueva bastante
+    app.reloj._t0 -= 1.0                                               # (como si hubiera pasado 1 s)
+    app.paso_render()
+    x1 = app.escena.astros["objetivos"]["mercurio"][:2]
+    print(f"  Mercurio se movio {math.hypot(x1[0] - x0[0], x1[1] - x0[1]):.0f} px en un mes simulado")
+    assert math.hypot(x1[0] - x0[0], x1[1] - x0[1]) > 20
+    f = app._fecha
+    app._viajar("venus", time.perf_counter())
+    assert app.reloj.congelado
+    time.sleep(0.05)
+    app.paso_render()
+    assert app._fecha == app.reloj.fecha(time.perf_counter())         # congelado: la fecha no avanza
+    app.viaje.t0 -= C.VIAJE_DURACION + 1
+    app.paso_render()
+    assert app.foco == "venus" and not app.reloj.congelado
+    app.tecla(ord("t"))
+    assert app.reloj.velocidad == 1 and abs((app.reloj.fecha(time.perf_counter()) - f).days) >= 25
+
+
+def test_fichas_educativas():
+    """Cada astro tiene ficha; se ve al llegar, se desvanece tras FICHA_DURACION y D la fija u oculta.
+    El texto cabe en el panel (se parte en renglones)."""
+    import cv2
+    from universo import astros as A
+    from universo.fichas import FICHAS
+    from main import Aplicacion, Captura
+    app = Aplicacion(Captura(FuenteFalsa().leer), DetectorGuion())
+    assert set(app.escena._cuerpos(A.dia_juliano(app._fecha))) <= set(FICHAS)
+    t = time.perf_counter()
+    assert app.opacidad_ficha(t) == 1.0                                # al arrancar: la de la Tierra
+    assert app.opacidad_ficha(t + C.FICHA_DURACION + 1.5) == 0.0       # luego se desvanece
+    app.escena.esperar_iconos()
+    app.paso_render()
+    app._viajar("venus", t)
+    app.viaje.t0 -= C.VIAJE_DURACION + 1
+    app.paso_render()
+    assert app.foco == "venus" and app.opacidad_ficha(time.perf_counter()) == 1.0
+    img = app.paso_render().copy()
+    app.ver_ficha = False
+    sin = app.paso_render().copy()
+    panel = (slice(app.escena.h - 300, app.escena.h - 92), slice(20, 20 + C.FICHA_ANCHO))
+    dif = np.abs(img[panel].astype(int) - sin[panel].astype(int)).mean()
+    print(f"  ficha de Venus: diferencia media en el panel {dif:.1f}")
+    assert dif > 8
+    cv2.imwrite(str(SALIDA / "render_ficha_venus.png"), img)
+    app.tecla(ord("d"))                                                # oculta -> fija
+    assert app.ver_ficha is True and app.opacidad_ficha(time.perf_counter() + 100) == 1.0
+    app.tecla(ord("d"))
+    assert app.ver_ficha is False
+    # ningun renglon se sale del panel
+    esc = app.escena
+    for n, f in FICHAS.items():
+        col = max(esc.medir_texto(e, 13, False)[0] for e, _ in f["filas"]) + 14
+        for _, v in f["filas"]:
+            assert all(esc.medir_texto(r, 13, False)[0] <= C.FICHA_ANCHO - 28 - col for r in esc._envolver(v, 13, C.FICHA_ANCHO - 28 - col))
+
+
 def test_vista_sistema_solar():
     import cv2
     from universo import astros as A
@@ -714,6 +872,7 @@ def test_vista_sistema_solar():
     est = Control().instantanea(0.0)
     fecha = _fecha(2026, 11, 22, 0, 33)
     jd = A.dia_juliano(fecha)
+    esc.esperar_iconos()
     # desde arriba (inclinacion de la vista = 0): las distancias en pantalla son las del plano de la eclíptica
     incl = -math.radians(C.SISTEMA_INCLINACION)
     for k in range(3):                                             # (los primeros cuadros preparan tablas y luz)
@@ -761,6 +920,7 @@ def test_cambio_de_vista_en_la_aplicacion():
     t = time.perf_counter()
     app._viajar("marte", t)
     assert app.modo == "astro" and app.viaje is not None and app.viaje.nombre == "marte"
+    assert app.escena.marte.pedido                                   # el viaje ya pidio su textura grande
     app.paso_render()
     app.viaje.t0 = t - C.VIAJE_DURACION - 1                       # ya termino
     app.paso_render()
