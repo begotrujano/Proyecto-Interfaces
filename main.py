@@ -280,7 +280,7 @@ class Aplicacion:
         self.deteccion = Deteccion(captura, detector, self.seguidor, self.control)
         self.suave = Suave(C.SUAVIZADO_TAU)
         self.ver_camara = True
-        self.ver_info = True
+        self.ver_info = False             # datos tecnicos (fps, ratios de la mano): tecla H o el panel de vista
         self.fps_render = 0.0
         self._t_prev = time.perf_counter()
         self.foco = "tierra"              # astro que orbita la camara
@@ -359,6 +359,12 @@ class Aplicacion:
             self.gravedad.actualizar(est, self.foco, dt, t, self._dim[0], self._dim[1])
             self.corte.actualizar(est, self.modo, self.viaje or self.salida)
         self.quiz.actualizar(est, objetivos, self._dim[0], self._dim[1], t)
+        interruptores = [("t_camara", "CÁMARA", self.ver_camara),
+                         ("t_ficha", "FICHA", self.opacidad_ficha(t) > 0.5),
+                         ("t_info", "DATOS TÉC.", self.ver_info)]
+        if self.voz is not None:
+            interruptores.append(("t_voz", "VOZ", self.voz_activa))
+        self.menu.interruptores = interruptores
         accion_menu = self.menu.actualizar(
             est, self.modo, self.comparador, self.gravedad, self.corte, self.quiz,
             self.viaje or self.salida, self._dim[0], self._dim[1], t
@@ -561,7 +567,16 @@ class Aplicacion:
         return float(min(max(1.0 - (t - self._ficha_t0 - C.FICHA_DURACION) / 2.5, 0.0), 1.0))
 
     def _accion_menu(self, accion, t):
-        if accion == "sistema":
+        if accion == "t_camara":                          # interruptores del panel de vista (derecha)
+            self.ver_camara = not self.ver_camara
+        elif accion == "t_ficha":
+            self.ver_ficha = not (self.opacidad_ficha(t) > 0.5)
+        elif accion == "t_info":
+            self.ver_info = not self.ver_info
+        elif accion == "t_voz":
+            self.voz_activa = not self.voz_activa
+            self.control.avisar("Voz activada" if self.voz_activa else "Voz en silencio")
+        elif accion == "sistema":
             self.comparador.cerrar()
             self.quiz.cerrar()
             self.alternar_sistema(t)

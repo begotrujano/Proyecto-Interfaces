@@ -114,3 +114,19 @@ FICHAS = {
         dato="Tiene el volcán más alto del Sistema Solar (Monte Olimpo) y allá viven robots exploradores tomándole fotos.",
     ),
 }
+
+# Numeros del panel del astro (NASA Planetary Fact Sheet; lunas conocidas a 2025: cambian cuando se descubren mas).
+# diametro en km, temperatura media en grados C, vuelta (orbita) en dias, giro (dia) en horas (negativo = al reves),
+# lunas. El Sol: su "vuelta" es alrededor de la galaxia y en vez de lunas tiene planetas.
+DATOS_FICHA = {
+    "sol": dict(diametro_km=1392700, temp_c=5500, vuelta_dias=None, giro_h=609.1, lunas=8),
+    "mercurio": dict(diametro_km=4879, temp_c=167, vuelta_dias=88, giro_h=1407.6, lunas=0),
+    "venus": dict(diametro_km=12104, temp_c=464, vuelta_dias=225, giro_h=-5832.5, lunas=0),
+    "tierra": dict(diametro_km=12756, temp_c=15, vuelta_dias=365, giro_h=23.9, lunas=1),
+    "luna": dict(diametro_km=3475, temp_c=-20, vuelta_dias=27.3, giro_h=655.7, lunas=0),
+    "marte": dict(diametro_km=6792, temp_c=-65, vuelta_dias=687, giro_h=24.6, lunas=2),
+    "jupiter": dict(diametro_km=142984, temp_c=-110, vuelta_dias=4331, giro_h=9.9, lunas=95),
+    "saturno": dict(diametro_km=120536, temp_c=-140, vuelta_dias=10747, giro_h=10.7, lunas=274),
+    "urano": dict(diametro_km=51118, temp_c=-195, vuelta_dias=30589, giro_h=-17.2, lunas=29),
+    "neptuno": dict(diametro_km=49528, temp_c=-200, vuelta_dias=59800, giro_h=16.1, lunas=16),
+}

@@ -1,7 +1,7 @@
 """Modos educativos interactivos para niños:
   - Comparador de tamaños (2 puños en vista sistema, menú con palma o tecla C)
   - "¿Cuánto pesarías aquí?" con pelota y gravedad real (menú con palma o tecla G + gesto de lanzar)
-  - Corte transversal de capas internas (separar 2 manos abiertas sobre el astro, menú o tecla X)
+  - Corte transversal de capas internas (solo con el botón Capas, la tecla X o la voz)
   - Modo Quiz respondiendo al señalar con el índice (menú con palma o tecla K)
   - Menú flotante activable con la palma en pausa (sin necesidad de teclado)
 """
@@ -136,6 +136,8 @@ PARES_DEMO = [
     ("sol", "jupiter"),
 ]
 
+TECLAS_MENU = {"sistema": "S", "comparar": "C", "gravedad": "G", "corte": "X", "quiz": "K"}
+
 _ASTROS_COMP = ["sol", "mercurio", "venus", "tierra", "luna", "marte", "jupiter", "saturno", "urano", "neptuno"]
 for _i, _a in enumerate(_ASTROS_COMP):                                                 # y el resto de combinaciones
     for _b in _ASTROS_COMP[_i + 1:]:
@@ -162,15 +164,17 @@ PREGUNTAS_QUIZ = [
 ]
 
 
-def _panel(buf, x0, y0, x1, y1, borde=(95, 85, 75)):
-    """Panel oscuro translúcido igual al estilo de las fichas."""
+def _panel(buf, x0, y0, x1, y1, borde=(78, 72, 66)):
+    """Panel oscuro translucido con esquinas cortadas (el estilo de universo/interfaz.py)."""
     H, W = buf.shape[:2]
     xa, xb, ya, yb = max(int(x0), 0), min(int(x1), W), max(int(y0), 0), min(int(y1), H)
     if xb <= xa or yb <= ya:
         return
     roi = buf[ya:yb, xa:xb]
-    cv2.addWeighted(roi, 0.32, np.full_like(roi, (22, 16, 12)), 0.68, 0, dst=roi)
-    cv2.rectangle(buf, (xa, ya), (xb - 1, yb - 1), borde, 1, cv2.LINE_AA)
+    cv2.addWeighted(roi, 0.14, _plano(roi.shape, (24, 21, 19)), 0.86, 0, dst=roi)
+    from universo.interfaz import poligono
+    pts = poligono(xb - xa, yb - ya, C.UI_CHAFLAN) + np.array([xa, ya], np.int32)
+    cv2.polylines(buf, [pts], True, borde, 1, cv2.LINE_AA)
 
 
 def _punta_indice(mano_vista, w, h):
@@ -506,21 +510,24 @@ class ComparadorTamanos:
         valor = 1.0 + (ratio - 1.0) * _ease_cubica((t - self._t_inicio) / 1.4)
         vol = ratio ** 3
         mitad = min(340.0, w * 0.5 - 270.0)                      # sin tapar el estado (izq.) ni la camara (der.)
-        _panel(buf, w * 0.5 - mitad, 18, w * 0.5 + mitad, 108, COL_CIAN)
-        T.dibujar(buf, f"COMPARADOR A ESCALA REAL: {S.NOMBRES[a]} vs {S.NOMBRES[b]}", w * 0.5, 28, 19, COL_CIAN, True, "c")
+        y_enc = C.UI_BARRA_ALTO - 4                              # (bajo la barra superior)
+        _panel(buf, w * 0.5 - mitad, 18 + y_enc, w * 0.5 + mitad, 108 + y_enc, COL_CIAN)
+        T.dibujar(buf, f"COMPARADOR A ESCALA REAL: {S.NOMBRES[a]} vs {S.NOMBRES[b]}", w * 0.5, 28 + y_enc, 19, COL_CIAN, True, "c")
         nom_may = a if ra >= rb else b
         nom_men = b if ra >= rb else a
         if ratio < 1.15:
             frase = f"¡{S.NOMBRES[a]} y {S.NOMBRES[b]} casi miden lo mismo! (×{valor:.2f})"
         else:
             frase = f"¡{_con_articulo(nom_may, True)} es {valor:.1f} veces más grande que {_con_articulo(nom_men)}!"
-        T.dibujar(buf, frase, w * 0.5, 60, 17, COL_TEXTO, False, "c")
+        T.dibujar(buf, frase, w * 0.5, 60 + y_enc, 17, COL_TEXTO, False, "c")
         vol_v = valor ** 3                                       # el volumen sube junto con la razón
         T.dibujar(buf, f"{_con_articulo(nom_may, True)} tiene ≈ {_miles(vol_v, 0 if vol >= 10 else 1)} veces "
                        f"el volumen de {_con_articulo(nom_men)}",
-                  w * 0.5, 84, 13, COL_TENUE, False, "c")
-        T.dibujar(buf, "Puño derecho: arrastra para girarlos  ·  Separa ambas manos abiertas para cerrar  ·  Teclas C y N",
-                  w * 0.5, h - 26, 14, COL_TENUE, False, "c")
+                  w * 0.5, 84 + y_enc, 13, COL_TENUE, False, "c")
+        if self.eligiendo is None:                               # (con la fila de astros abierta no cabe)
+            y_pie = (h - C.UI_MARGEN - C.UI_BOTON_ALTO - 2 * C.UI_FILA_GAP - C.UI_EXTRA_ALTO - 26)
+            T.dibujar(buf, "Puño derecho: arrastra para girarlos  ·  Separa ambas manos abiertas para cerrar",
+                      w * 0.5, y_pie, 12, COL_TENUE, False, "c")
 
 
 # ----------------------------------------------------------------------
@@ -542,7 +549,7 @@ class SimuladorGravedad:
     def alternar(self, w, h, t):
         self.activo = not self.activo
         if self.activo:
-            self.lanzar(w * 0.75, h * 0.52, h - 210, t)
+            self.lanzar(w * 0.66, h * 0.52, h - 210, t)
 
     def cambiar_peso(self, delta):
         self.peso_tierra = float(np.clip(self.peso_tierra + delta, 10.0, 120.0))
@@ -571,7 +578,7 @@ class SimuladorGravedad:
             if prev is not None and dt > 1e-4:
                 vy_norm = (prev - yn) / dt    # positivo = subiendo
                 if vy_norm > C.LANZAR_V_ON and (t - self._ultimo_lanzamiento) > 0.65:
-                    self.lanzar(np.clip(m.x, 120, w - 120), min(m.y, h - 230), h - 210, t)
+                    self.lanzar(np.clip(m.x, 120, w - C.UI_MARGEN - 300 - 80), min(m.y, h - 230), h - 210, t)
 
         # Física de caída y rebote
         if self.pelota_activa:
@@ -598,19 +605,20 @@ class SimuladorGravedad:
         salto_aqui = C.SALTO_TIERRA_M / max(factor, 0.01)
 
         # Panel a la derecha (debajo de la miniatura de cámara)
-        px0, py0, px1, py1 = w - 360, 240, w - 16, 425
+        px1, py1 = w - C.UI_MARGEN, h - C.UI_MARGEN - C.UI_BOTON_ALTO - 4
+        px0, py0 = px1 - 300, py1 - 170
         _panel(buf, px0, py0, px1, py1, COL_ACENTO)
-        T.dibujar(buf, "¿CUÁNTO PESARÍAS AQUÍ?", px0 + 14, py0 + 12, 16, COL_ACENTO, True)
+        T.dibujar(buf, "¿CUÁNTO PESARÍAS AQUÍ?", px0 + 14, py0 + 12, 13, COL_ACENTO, True)
         T.dibujar(buf, f"En la Tierra pesas: {self.peso_tierra:.0f} kg",
                   px0 + 14, py0 + 40, 13, COL_TENUE)
         T.dibujar(buf, f"En {S.NOMBRES[foco]} pesarías: {peso_aqui:.1f} kg",
-                  px0 + 14, py0 + 68, 17, COL_TEXTO, True)
+                  px0 + 14, py0 + 66, 15, COL_TEXTO, True)
         T.dibujar(buf, f"Tu salto sería de: {salto_aqui:.2f} m",
-                  px0 + 14, py0 + 98, 16, COL_OK, True)
+                  px0 + 14, py0 + 92, 14, COL_OK, True)
         T.dibujar(buf, f"Gravedad: {g:.2f} m/s² ({factor:.2f}× Tierra)",
-                  px0 + 14, py0 + 126, 13, COL_TENUE)
+                  px0 + 14, py0 + 118, 12, COL_TENUE)
         T.dibujar(buf, "¡Mueve tu mano hacia arriba para lanzar!",
-                  px0 + 14, py0 + 154, 13, COL_CIAN)
+                  px0 + 14, py0 + 142, 12, COL_CIAN)
 
         # Pelota y suelo de referencia
         if self.pelota_activa:
@@ -621,7 +629,7 @@ class SimuladorGravedad:
 
 
 # ----------------------------------------------------------------------
-# 3. Corte transversal (separar las 2 manos abiertas sobre el planeta o tecla X)
+# 3. Corte transversal (capas del interior): solo con el boton Capas, la tecla X o la voz
 # ----------------------------------------------------------------------
 class CorteTransversal:
     def __init__(self):
@@ -632,18 +640,11 @@ class CorteTransversal:
         self.manual = not self.manual
 
     def actualizar(self, est, modo, viaje):
+        """Solo el boton Capas (tecla X o "capas" por voz) lo abre o cierra; las manos no lo mueven."""
         if modo != "astro" or viaje is not None:
             self.apertura = 0.0
             return
         objetivo = 1.0 if self.manual else 0.0
-
-        # Gesto: 2 manos visibles y abiertas (ni puño ni OK) separándose horizontalmente
-        if not self.manual:
-            abiertas = [m for m in est.manos if m.visible and not m.puno and not m.ok]
-            if len(abiertas) == 2:
-                dist = abs(float(abiertas[0].norm[9, 0] - abiertas[1].norm[9, 0]))
-                t_ap = (dist - C.CORTE_DIST_MIN) / max(C.CORTE_DIST_MAX - C.CORTE_DIST_MIN, 1e-3)
-                objetivo = float(np.clip(t_ap, 0.0, 1.0))
 
         self.apertura = 0.82 * self.apertura + 0.18 * objetivo
         if self.apertura < 0.02 and objetivo == 0.0:
@@ -671,7 +672,7 @@ class CorteTransversal:
 
         # Etiquetas de cada capa cuando ya está suficientemente abierto
         if self.apertura > 0.50:
-            tx = min(cx_i + r_i + 34, escena.w - 290)
+            tx = min(cx_i + r_i + 34, escena.w - C.UI_MARGEN - C.UI_PANEL_DER_ANCHO - 270)
             y_base = max(cy_i - 55, 110)
             for idx, (frac, color_bgr, nombre) in enumerate(capas):
                 ang = math.radians(-55 + idx * (110 / max(len(capas) - 1, 1)))
@@ -779,22 +780,22 @@ class ModoQuiz:
         w = escena.w
 
         mitad = min(390.0, w * 0.5 - 270.0)                      # sin tapar el estado (izq.) ni la camara (der.)
-        _panel(buf, w * 0.5 - mitad, 14, w * 0.5 + mitad, 96, COL_OK)
+        _panel(buf, w * 0.5 - mitad, 14 + C.UI_BARRA_ALTO - 4, w * 0.5 + mitad, 96 + C.UI_BARRA_ALTO - 4, COL_OK)
         if t < self.feedback_hasta:
             col = COL_OK if self.es_correcta else COL_ERR
-            T.dibujar(buf, self.feedback, w * 0.5, 42, 19, col, True, "c")
+            T.dibujar(buf, self.feedback, w * 0.5, 42 + C.UI_BARRA_ALTO - 4, 19, col, True, "c")
         elif self.actual is None:
             T.dibujar(buf, f"¡Reto completado! Aciertos: {self.puntaje} de {len(self.preguntas)}",
-                      w * 0.5, 30, 21, COL_OK, True, "c")
+                      w * 0.5, 30 + C.UI_BARRA_ALTO - 4, 21, COL_OK, True, "c")
             T.dibujar(buf, "Deja la palma sobre Quiz (o presiona K) para salir",
-                      w * 0.5, 62, 14, COL_TENUE, False, "c")
+                      w * 0.5, 62 + C.UI_BARRA_ALTO - 4, 14, COL_TENUE, False, "c")
         else:
             pregunta = self.actual[0]
             T.dibujar(buf, f"QUIZ ESPACIAL ({self.indice + 1}/{len(self.preguntas)})  ·  Puntos: {self.puntaje}",
-                      w * 0.5, 22, 14, COL_OK, True, "c")
-            T.dibujar(buf, pregunta, w * 0.5, 46, 19, COL_TEXTO, True, "c")
+                      w * 0.5, 22 + C.UI_BARRA_ALTO - 4, 14, COL_OK, True, "c")
+            T.dibujar(buf, pregunta, w * 0.5, 46 + C.UI_BARRA_ALTO - 4, 19, COL_TEXTO, True, "c")
             T.dibujar(buf, "Señala un planeta con tu dedo índice (o haz clic)",
-                      w * 0.5, 72, 13, COL_TENUE, False, "c")
+                      w * 0.5, 72 + C.UI_BARRA_ALTO - 4, 13, COL_TENUE, False, "c")
 
         # Puntero y anillo de confirmación al señalar
         if self.puntero is not None:
@@ -838,71 +839,77 @@ def _dibujar_icono_menu(buf, bid, cx, cy, col):
 # 5. Menú flotante con tarjetas redondeadas (icono arriba + texto abajo)
 # ----------------------------------------------------------------------
 class MenuGestos:
-    """Botones redondeados en fila horizontal abajo a la derecha.
-    En pausa, deja la palma encima 0.85 s (o haz clic) para activar/desactivar cada modo."""
+    """Botones de los modos en una fila abajo al centro (con su tecla), los de contexto encima y los interruptores
+    de vista en el panel derecho. En pausa, deja la palma encima 0.85 s (o haz clic) para activarlos.
+    `interruptores` lo llena main en cada cuadro: [(id, texto, encendido)]."""
 
     def __init__(self, dwell_s=0.85):
         self.dwell_s = dwell_s
         self.botones = []             # [(id, texto, activo, x0, y0, x1, y1)]
+        self.interruptores = []
+        self._tipo = {}               # id -> "modo" | "extra" | "astro" | "interruptor"
+        self.tope = None              # y del borde de arriba de las filas de botones (la ayuda va encima)
         self.hover_id = None
         self._inicio = 0.0
         self.progreso = 0.0
         self._cooldown_hasta = 0.0
-        self._cache_skins = {}
+
+    @staticmethod
+    def _fila(items, ancho, alto, y0, w, gap):
+        total = len(items) * ancho + (len(items) - 1) * gap
+        x = w / 2 - total / 2
+        return [(bid, txt, act, int(x + i * (ancho + gap)), int(y0), int(x + i * (ancho + gap) + ancho), int(y0 + alto))
+                for i, (bid, txt, act) in enumerate(items)]
 
     def _construir(self, w, h, modo, comparador, gravedad, corte, quiz):
-        items = [
-            ("sistema", "Planeta" if modo == "sistema" else "Sistema", modo == "sistema"),
-            ("comparar", "Comparar", comparador.activo),
-            ("quiz", "Quiz", quiz.activo),
-        ]
+        items = [("sistema", "PLANETA" if modo == "sistema" else "SISTEMA", modo == "sistema"),
+                 ("comparar", "COMPARAR", comparador.activo)]
         if modo == "astro" and not comparador.activo:
-            items.insert(2, ("gravedad", "Gravedad", gravedad.activo))
-            items.insert(3, ("corte", "Capas", corte.manual))
+            items += [("gravedad", "GRAVEDAD", gravedad.activo), ("corte", "CAPAS", corte.manual)]
+        items.append(("quiz", "QUIZ", quiz.activo))
+        y0 = h - C.UI_MARGEN - C.UI_BOTON_ALTO
+        botones = self._fila(items, C.UI_BOTON_ANCHO, C.UI_BOTON_ALTO, y0, w, C.UI_BOTON_GAP)
+        tipo = {b[0]: "modo" for b in botones}
+        tope = y0
 
-        # Tarjetas principales (icono arriba, texto abajo) en fila horizontal
-        bw, bh, gap = 92, 74, 12
-        total_w = len(items) * bw + (len(items) - 1) * gap
-        x_ini = w - total_w - 22
-        y0 = h - 162
-        botones = []
-        for i, (bid, txt, act) in enumerate(items):
-            x0 = x_ini + i * (bw + gap)
-            botones.append((bid, txt, act, x0, y0, x0 + bw, y0 + bh))
-
-        # Botones contextuales encima de la fila principal
         extras = []
         if comparador.activo:
             a, b = comparador.par or ("", "")
-            extras = [
-                ("elegir_0", S.NOMBRES.get(a, "Astro 1"), comparador.eligiendo == 0),
-                ("elegir_1", S.NOMBRES.get(b, "Astro 2"), comparador.eligiendo == 1),
-                ("otro_par", "Otro par", False),
-                ("comparar", "Cerrar", True),
-            ]
+            extras = [("elegir_0", S.NOMBRES.get(a, "Astro 1").upper(), comparador.eligiendo == 0),
+                      ("elegir_1", S.NOMBRES.get(b, "Astro 2").upper(), comparador.eligiendo == 1),
+                      ("otro_par", "OTRO PAR", False), ("comparar", "CERRAR", False)]
         elif gravedad.activo and modo == "astro":
-            extras = [("peso_menos", "-5 kg", False), ("peso_mas", "+5 kg", False)]
-
-        ey0 = y0
+            extras = [("peso_menos", "−5 KG", False), ("peso_mas", "+5 KG", False)]
         if extras:
-            ew, eh = 100, 38
-            ex_ini = w - (len(extras) * ew + (len(extras) - 1) * gap) - 22
-            ey0 = y0 - eh - 10
-            for i, (bid, txt, act) in enumerate(extras):
-                x0 = ex_ini + i * (ew + gap)
-                botones.append((bid, txt, act, x0, ey0, x0 + ew, ey0 + eh))
+            tope -= C.UI_FILA_GAP + C.UI_EXTRA_ALTO
+            fila = self._fila(extras, C.UI_EXTRA_ANCHO, C.UI_EXTRA_ALTO, tope, w, C.UI_BOTON_GAP)
+            botones += [f for f in fila if f[0] != "comparar"] + [f for f in fila if f[0] == "comparar"]
+            tipo.update({f[0]: "extra" for f in fila})
+            tipo["comparar"] = "modo"                     # (el boton de abajo sigue siendo el mismo modo)
 
         if comparador.activo and comparador.eligiendo is not None and comparador.par:
             actual = comparador.par[comparador.eligiendo]
-            pw, ph, pgap = C.COMPARADOR_SELECTOR_ANCHO, C.COMPARADOR_SELECTOR_ALTO, C.COMPARADOR_SELECTOR_GAP
-            n = len(_ASTROS_COMP)
-            px_ini = w - (n * pw + (n - 1) * pgap) - 22
-            py0 = ey0 - ph - 10
-            for i, nombre in enumerate(_ASTROS_COMP):
-                x0 = px_ini + i * (pw + pgap)
-                botones.append(("astro_" + nombre, S.NOMBRES[nombre], nombre == actual, x0, py0, x0 + pw, py0 + ph))
+            tope -= C.UI_FILA_GAP + C.COMPARADOR_SELECTOR_ALTO
+            fila = self._fila([("astro_" + n, S.NOMBRES[n].upper(), n == actual) for n in _ASTROS_COMP],
+                              C.COMPARADOR_SELECTOR_ANCHO, C.COMPARADOR_SELECTOR_ALTO, tope, w, C.COMPARADOR_SELECTOR_GAP)
+            botones += fila
+            tipo.update({f[0]: "astro" for f in fila})
 
+        self.tope = tope
+        self._tipo = tipo
         self.botones = botones
+        self._cajas_int = []
+
+    def _con_interruptores(self, escena_w):
+        """Agrega las cajas de los interruptores (necesita la interfaz para su posicion)."""
+        if not self.interruptores:
+            return
+        from universo.interfaz import Interfaz
+        ui = Interfaz.__new__(Interfaz)                   # solo para medir cajas: no hace falta la escena entera
+        ui.e = type("E", (), {"w": escena_w})()
+        cajas = Interfaz.cajas_interruptores(ui, self.interruptores)
+        self.botones += cajas
+        self._tipo.update({c[0]: "interruptor" for c in cajas})
 
     def boton_en(self, x, y):
         for bid, _, _, x0, y0, x1, y1 in self.botones:
@@ -919,6 +926,7 @@ class MenuGestos:
             return None
 
         self._construir(w, h, modo, comparador, gravedad, corte, quiz)
+        self._con_interruptores(w)
 
         if est.activo or t < self._cooldown_hasta:
             self.hover_id = None
@@ -953,69 +961,15 @@ class MenuGestos:
             return tocado
         return None
 
-    def _skin_boton(self, T, w, h, estado_vis):
-        """Precalcula (1 - alfa) y color premultiplicado del botón redondeado."""
-        clave = (w, h, estado_vis)
-        if clave in self._cache_skins:
-            return self._cache_skins[clave]
-
-        radio = 16 if h >= 60 else 12
-        m_img = T.Image.new("L", (w, h), 0)
-        T.ImageDraw.Draw(m_img).rounded_rectangle((1, 1, w - 2, h - 2), radius=radio, fill=255)
-        masc = np.asarray(m_img, np.float32) / 255.0
-
-        b_img = T.Image.new("L", (w, h), 0)
-        T.ImageDraw.Draw(b_img).rounded_rectangle((1, 1, w - 2, h - 2), radius=radio, outline=255, width=2)
-        borde = np.asarray(b_img, np.float32) / 255.0
-
-        if estado_vis == "activo":
-            fondo = np.array([62, 46, 26], np.float32)
-            col_borde = np.array(COL_CIAN, np.float32)
-            op_fondo, op_borde = 0.90, 0.98
-        elif estado_vis == "hover":
-            fondo = np.array([54, 40, 24], np.float32)
-            col_borde = np.array(COL_OK, np.float32)
-            op_fondo, op_borde = 0.88, 0.95
-        else:
-            fondo = np.array([34, 22, 16], np.float32)
-            col_borde = np.array([195, 160, 95], np.float32)
-            op_fondo, op_borde = 0.85, 0.65
-
-        a_tot = np.clip(np.maximum(masc * op_fondo, borde * op_borde), 0.0, 1.0)[..., None]
-        pre = (masc[..., None] * op_fondo * fondo * (1.0 - borde[..., None] * op_borde)
-               + borde[..., None] * op_borde * col_borde)
-        inv = 1.0 - a_tot
-        self._cache_skins[clave] = (inv, pre)
-        return inv, pre
-
     def dibujar(self, escena):
-        if not self.botones:
-            return
-        buf, T = escena.buf, escena.texto
-        H, W = buf.shape[:2]
-
+        ui = escena.ui
+        hover_int = self.hover_id if self._tipo.get(self.hover_id) == "interruptor" else None
+        ui.panel_vista(escena.buf, self.interruptores, hover_int, self.progreso if hover_int else 0.0)
         for bid, txt, activo, x0, y0, x1, y1 in self.botones:
-            xa, xb, ya, yb = max(int(x0), 0), min(int(x1), W), max(int(y0), 0), min(int(y1), H)
-            bw, bh = xb - xa, yb - ya
-            if bw <= 4 or bh <= 4:
+            tipo = self._tipo.get(bid, "modo")
+            if tipo == "interruptor":
                 continue
-
-            estado_vis = "activo" if activo else ("hover" if bid == self.hover_id else "normal")
-            inv, pre = self._skin_boton(T, bw, bh, estado_vis)
-            roi = buf[ya:yb, xa:xb]
-            roi[:] = cv2.convertScaleAbs(cv2.add(cv2.multiply(roi.astype(np.float32), inv), pre))
-
-            if bid == self.hover_id and self.progreso > 0.0:
-                margen = 12 if bh >= 60 else 8
-                ancho_p = int((bw - 2 * margen) * self.progreso)
-                if ancho_p > 0:
-                    cv2.line(buf, (xa + margen, yb - 6), (xa + margen + ancho_p, yb - 6),
-                             COL_OK, 3, cv2.LINE_AA)
-
-            col_txt = COL_CIAN if activo else COL_TEXTO
-            cx_mid = (xa + xb) / 2.0
-            if bh >= 60:
-                _dibujar_icono_menu(buf, bid, cx_mid, ya + 26, col_txt)
-                T.dibujar(buf, txt, cx_mid, yb - 24, 13, col_txt, activo or bid == self.hover_id, "c")
-            else:
-                T.dibujar(buf, txt, cx_mid, (ya + yb) / 2.0 - 8, 13, col_txt, True, "c")
+            estado = "activo" if activo else ("hover" if bid == self.hover_id else "normal")
+            ui.boton(escena.buf, bid, txt, x0, y0, x1, y1, estado,
+                     self.progreso if bid == self.hover_id else 0.0,
+                     TECLAS_MENU.get(bid) if tipo == "modo" else None)

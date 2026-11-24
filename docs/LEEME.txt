@@ -50,6 +50,9 @@ COMANDOS POR VOZ (opcional, sin internet)
     "activa el control" / "pausa el control" (gestos)    "oculta la camara"    "reinicia"    "ayuda"
     "silencio" (deja de obedecer)  /  "activa la voz" o "aster escucha"  (vuelve a escuchar)
 
+TIPOGRAFIA DE LA INTERFAZ (opcional, una vez con internet)
+  .venv\Scripts\python.exe herramientas\descargar_fuentes.py   (Exo 2, licencia OFL; sin ella se usa Segoe UI)
+
 SI ALGO NO SE SIENTE BIEN -> universo\config.py (tiene la guia al inicio)
   Con la tecla H ves en vivo los numeros de cada mano:
     puno  < 1.30 = puno cerrado      ok < 0.33 y dedos >= 2 = OK

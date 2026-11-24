@@ -1133,7 +1133,8 @@ def test_fichas_educativas():
     img = app.paso_render().copy()
     app.ver_ficha = False
     sin = app.paso_render().copy()
-    panel = (slice(app.escena.h - 300, app.escena.h - 92), slice(20, 20 + C.FICHA_ANCHO))
+    x0, y0, x1, y1 = app.escena.ui.caja_astro("venus")
+    panel = (slice(y0, y1), slice(x0, x1))
     dif = np.abs(img[panel].astype(int) - sin[panel].astype(int)).mean()
     print(f"  ficha de Venus: diferencia media en el panel {dif:.1f}")
     assert dif > 8
@@ -1142,12 +1143,14 @@ def test_fichas_educativas():
     assert app.ver_ficha is True and app.opacidad_ficha(time.perf_counter() + 100) == 1.0
     app.tecla(ord("d"))
     assert app.ver_ficha is False
-    # ningun renglon se sale del panel
+    # el panel de cada astro cabe entre la barra de arriba y la fila de botones, y su texto no se sale
     esc = app.escena
+    from universo.interfaz import filas_astro
     for n, f in FICHAS.items():
-        col = max(esc.medir_texto(e, 13, False)[0] for e, _ in f["filas"]) + 14
-        for _, v in f["filas"]:
-            assert all(esc.medir_texto(r, 13, False)[0] <= C.FICHA_ANCHO - 28 - col for r in esc._envolver(v, 13, C.FICHA_ANCHO - 28 - col))
+        x0, y0, x1, y1 = esc.ui.caja_astro(n)
+        assert y0 >= C.UI_BARRA_ALTO and y1 <= esc.h - C.UI_MARGEN - C.UI_BOTON_ALTO - 30, (n, y1)
+        assert len(filas_astro(n)) == 5
+        assert all(esc.medir_texto(r, 13, False)[0] <= C.UI_PANEL_IZQ_ANCHO - 48 for r in esc._envolver(f["dato"], 13, C.UI_PANEL_IZQ_ANCHO - 48))
 
 
 def test_vista_sistema_solar():
@@ -1589,6 +1592,62 @@ def test_voz_en_la_aplicacion():
     assert not app.quiz.activo
     assert app.comando_voz("blablabla") is None
     print("  voz: viajes, comparador, quiz, vistas, gravedad, capas, tiempo, zoom, giro y control OK")
+
+
+def test_capas_solo_con_boton():
+    """Las capas del interior ya no se abren separando las manos: solo con el boton (o X / voz), como la gravedad."""
+    from types import SimpleNamespace
+    from universo.modos import CorteTransversal
+    corte = CorteTransversal()
+    def mano(x):
+        norm = np.zeros((21, 2)); norm[9, 0] = x
+        return SimpleNamespace(visible=True, puno=False, ok=False, norm=norm)
+    abiertas = SimpleNamespace(manos=[mano(0.1), mano(0.9)])     # dos manos abiertas muy separadas
+    for _ in range(60):
+        corte.actualizar(abiertas, "astro", None)
+    assert corte.apertura == 0.0
+    corte.alternar_manual()                                       # el boton
+    for _ in range(60):
+        corte.actualizar(SimpleNamespace(manos=[]), "astro", None)
+    assert corte.apertura > 0.95
+    corte.alternar_manual()
+    for _ in range(80):
+        corte.actualizar(abiertas, "astro", None)
+    assert corte.apertura == 0.0
+
+
+def test_interfaz_ordenada():
+    """Interfaz nueva: botones de modos centrados abajo y sin encimarse, interruptores de vista a la derecha que
+    funcionan con clic, texto con espaciado y pesos, y ninguna caja fija se encima con otra."""
+    from main import Aplicacion, Captura
+    app = Aplicacion(Captura(FuenteFalsa().leer), DetectorGuion())
+    app.escena.esperar_iconos()
+    app.paso_render()
+    m = app.menu
+    modos = [b for b in m.botones if m._tipo[b[0]] == "modo"]
+    assert [b[0] for b in modos] == ["sistema", "comparar", "gravedad", "corte", "quiz"]
+    centro = (modos[0][3] + modos[-1][5]) / 2
+    assert abs(centro - app.escena.w / 2) <= 2                        # centrados
+    assert all(a[5] <= b[3] for a, b in zip(modos, modos[1:]))       # sin encimarse
+    assert all(b[6] <= app.escena.h - C.UI_MARGEN + 1 for b in modos)
+    ints = [b for b in m.botones if m._tipo[b[0]] == "interruptor"]
+    assert {b[0] for b in ints} == {"t_camara", "t_ficha", "t_info"}
+    # cada interruptor cambia lo suyo con un clic
+    b = next(b for b in ints if b[0] == "t_camara")
+    app.clic((b[3] + b[5]) / 2, (b[4] + b[6]) / 2)
+    assert app.ver_camara is False
+    b = next(b for b in ints if b[0] == "t_info")
+    app.clic((b[3] + b[5]) / 2, (b[4] + b[6]) / 2)
+    assert app.ver_info is True
+    # el panel del astro, el de vista, la camara y los botones no se enciman
+    ui = app.escena.ui
+    cajas = [ui.caja_astro("tierra"), ui.caja_camara(3), (modos[0][3], modos[0][4], modos[-1][5], modos[-1][6])]
+    for i, a in enumerate(cajas):
+        for c in cajas[i + 1:]:
+            assert a[2] <= c[0] or c[2] <= a[0] or a[3] <= c[1] or c[3] <= a[1], (a, c)
+    T = app.escena.texto
+    assert T.ancho("ASTER", 20, 300, 8) > T.ancho("ASTER", 20, 300, 0) + 25    # el espaciado separa las letras
+    print(f"  botones de {modos[0][3]} a {modos[-1][5]} px; fuente: {T.variable or 'respaldo del sistema'}")
 
 
 def test_texto_rapido():

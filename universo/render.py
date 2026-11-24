@@ -20,7 +20,8 @@ from universo.fichas import FICHAS
 from universo.reloj import fecha_inicial, texto_velocidad
 from universo.carga import AstroBajoDemanda
 from universo.cielo import Cielo
-from universo.anillos import Saturno
+from universo.anillos import FACTOR_EXTERIOR, Saturno
+from universo.interfaz import Interfaz
 from universo.planetas import (textura_jupiter, textura_marte, textura_mercurio, textura_saturno, textura_sol,
                                textura_neptuno, textura_urano, textura_venus)
 from universo.tierra import Tierra, niveles_esfera
@@ -44,12 +45,21 @@ CONEXIONES = [
 # Texto con Pillow (acentos, buena tipografia) y cache de "sellos"
 # ----------------------------------------------------------------------
 class Texto:
-    FUENTES = {
-        False: ["segoeui.ttf", "C:/Windows/Fonts/segoeui.ttf", "arial.ttf",
-                "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"],
-        True: ["seguisb.ttf", "segoeuib.ttf", "C:/Windows/Fonts/segoeuib.ttf", "arialbd.ttf",
-               "DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"],
-    }
+    """Textos con Pillow (acentos, buena tipografia), en cache como "sellos" ya listos para mezclar.
+    peso: False/True (normal / seminegrita) o un numero 100-900 (300 = fina, como el ejemplo de interfaz).
+    espaciado: px extra entre letras (titulos en mayusculas, estilo consola espacial)."""
+    # respaldo si no esta Exo 2 (config.UI_FUENTE): por peso, el primer archivo que exista
+    RESPALDO = [
+        (250, ["segoeuil.ttf", "C:/Windows/Fonts/segoeuil.ttf", "DejaVuSans-ExtraLight.ttf",
+               "/usr/share/fonts/truetype/dejavu/DejaVuSans-ExtraLight.ttf"]),
+        (350, ["segoeuisl.ttf", "C:/Windows/Fonts/segoeuisl.ttf", "segoeuil.ttf"]),
+        (450, ["segoeui.ttf", "C:/Windows/Fonts/segoeui.ttf", "arial.ttf", "DejaVuSans.ttf",
+               "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]),
+        (650, ["seguisb.ttf", "C:/Windows/Fonts/seguisb.ttf", "segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf",
+               "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]),
+        (1000, ["segoeuib.ttf", "C:/Windows/Fonts/segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]),
+    ]
 
     def __init__(self):
         from PIL import Image, ImageDraw, ImageFont
@@ -57,54 +67,90 @@ class Texto:
         self._fuentes = {}
         self._nucleos = {}
         self._cache = OrderedDict()
+        ruta = C.RAIZ / C.UI_FUENTE
+        self.variable = str(ruta) if ruta.is_file() else None     # Exo 2 (fuente variable: un archivo, todos los pesos)
+
+    @staticmethod
+    def peso(negrita):
+        if negrita is True:
+            return 600
+        if negrita is False or negrita is None:
+            return 400
+        return int(negrita)
 
     def _fuente(self, tam, negrita):
-        clave = (tam, negrita)
-        if clave not in self._fuentes:
-            f = None
-            for nombre in self.FUENTES[negrita]:
-                try:
-                    f = self.ImageFont.truetype(nombre, tam)
-                    break
-                except OSError:
+        p = self.peso(negrita)
+        clave = (tam, p)
+        if clave in self._fuentes:
+            return self._fuentes[clave]
+        f = None
+        if self.variable is not None:
+            try:
+                f = self.ImageFont.truetype(self.variable, tam)
+                f.set_variation_by_axes([p])
+            except Exception:                              # Pillow sin soporte de fuentes variables
+                f = None
+        if f is None:
+            for limite, nombres in self.RESPALDO:
+                if p > limite:
                     continue
-            if f is None:
-                f = self.ImageFont.load_default(tam)
-            self._fuentes[clave] = f
-        return self._fuentes[clave]
+                for nombre in nombres:
+                    try:
+                        f = self.ImageFont.truetype(nombre, tam)
+                        break
+                    except OSError:
+                        continue
+                if f is not None:
+                    break
+        if f is None:
+            f = self.ImageFont.load_default(tam)
+        self._fuentes[clave] = f
+        return f
 
     def _nucleo(self, borde):
         if borde not in self._nucleos:
             self._nucleos[borde] = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * borde + 1, 2 * borde + 1))
         return self._nucleos[borde]
 
-    def sello(self, texto, tam, color, negrita):
-        clave = (texto, tam, color, negrita)
+    def sello(self, texto, tam, color, negrita, espaciado=0):
+        clave = (texto, tam, color, self.peso(negrita), espaciado)
         if clave in self._cache:
             self._cache.move_to_end(clave)
             return self._cache[clave]
         f = self._fuente(tam, negrita)
         borde = max(1, tam // 9)
         l, t, r, b = f.getbbox(texto, stroke_width=borde)
-        w, h = max(r - l + 2, 1), max(b - t + 2, 1)
+        extra = int(round(espaciado * max(len(texto) - 1, 0)))
+        w, h = max(r - l + 2 + extra, 1), max(b - t + 2, 1)
         m_txt = self.Image.new("L", (w, h), 0)
-        self.ImageDraw.Draw(m_txt).text((1 - l, 1 - t), texto, font=f, fill=255)    # (un solo trazado de Pillow)
+        d = self.ImageDraw.Draw(m_txt)
+        if espaciado:                                      # letra por letra, con aire entre ellas
+            x = 1 - l
+            for ch in texto:
+                d.text((x, 1 - t), ch, font=f, fill=255)
+                x += f.getlength(ch) + espaciado
+        else:
+            d.text((1 - l, 1 - t), texto, font=f, fill=255)    # (un solo trazado de Pillow)
         a_txt = np.asarray(m_txt, np.float32) / 255.0
         # el contorno es el texto "engordado" borde px: dilatar es ~50 veces mas barato que trazar otra vez con Pillow
         a_bor = cv2.dilate(a_txt, self._nucleo(borde))
-        alfa = np.maximum(a_txt, a_bor * 0.7)
+        # contorno oscuro solo en textos claros (sobre un boton claro, un texto oscuro con contorno se ve borroso)
+        alfa = np.maximum(a_txt, a_bor * 0.7) if sum(color) > 300 else a_txt
         pre = a_txt[..., None] * np.array(color, np.float32)
         s = ((pre + 0.5).astype(np.uint8), (alfa * 255 + 0.5).astype(np.uint8), -l + 1, -t + 1)
         self._cache[clave] = s
-        if len(self._cache) > 400:
+        if len(self._cache) > 600:
             self._cache.popitem(last=False)
         return s
 
-    def dibujar(self, buf, texto, x, y, tam=18, color=COL_TEXTO, negrita=False, ancla="i", opacidad=1.0):
+    def ancho(self, texto, tam, negrita=False, espaciado=0):
+        return self.sello(texto, tam, COL_TEXTO, negrita, espaciado)[1].shape[1] if texto else 0
+
+    def dibujar(self, buf, texto, x, y, tam=18, color=COL_TEXTO, negrita=False, ancla="i", opacidad=1.0, espaciado=0):
         """ancla: 'i' izquierda, 'c' centro, 'd' derecha. y = linea superior del texto."""
         if not texto or opacidad <= 0.01:
             return 0
-        pre, alfa, _, _ = self.sello(texto, tam, tuple(int(c) for c in color), negrita)
+        pre, alfa, _, _ = self.sello(texto, tam, tuple(int(c) for c in color), negrita, espaciado)
         h, w = alfa.shape
         x = int(round(x - (w / 2 if ancla == "c" else w if ancla == "d" else 0)))
         y = int(round(y))
@@ -189,6 +235,7 @@ class Escena:
         self.sol = Tierra(C.TEXTURA_SOL, emisivo=True, color_atm=C.COLOR_HALO_SOL,
                           desfase_lon=C.DESFASE_TEXTURA_SOL, respaldo=lambda: textura_sol(1024))
         self.texto = Texto()
+        self.ui = Interfaz(self)
         self.buf = np.zeros((alto, ancho, 3), np.uint8)
         self._lentos = {}                 # clave -> (cuando, texto): textos que cambian siempre y se refrescan solo unas veces por s
         self.radio_base = C.RADIO_BASE_REL * alto
@@ -256,7 +303,14 @@ class Escena:
         ficha = info.get("ficha")                          # (nombre, opacidad): ficha educativa del astro
         ficha_visible = (ficha is not None and modo == "astro" and viaje is None and fase is None
                          and ficha[1] > 0.01)
-        self._ocupado = [self._ficha_diseno(ficha[0])[0]] if ficha_visible and ficha[0] in FICHAS else []
+        menu = info.get("menu")
+        n_int = len(getattr(menu, "interruptores", ()) or ())
+        derecha = self.ui.caja_camara(n_int) if ver_camara else self.ui.caja_vista(max(n_int, 1))
+        self._ocupado = [(0, 0, self.w, C.UI_BARRA_ALTO + 8),            # zonas sin etiquetas de astros
+                         (derecha[0], C.UI_PANEL_Y, derecha[2], derecha[3]),
+                         (self.w / 2 - 360, self.h - 120, self.w / 2 + 360, self.h)]
+        if ficha_visible and ficha[0] in FICHAS:
+            self._ocupado.append(self.ui.caja_astro(ficha[0]))
         self._destino = viaje.nombre if viaje is not None else None
         if modo != self._modo:                             # fundido entre la vista de un astro y la del sistema
             if fase is None:                               # (la salida no lo necesita: el corte coincide)
@@ -272,6 +326,7 @@ class Escena:
             self._seleccion(seleccion)
         modos = info.get("modos")
         comparando = bool(modos and modos[2].activo)       # el comparador usa toda la pantalla: lo demas se aparta
+        quiz_activo = bool(modos and modos[3].activo)
         if self.resaltado is not None and modo == self._modo and not comparando:
             x, y, r, nombre = self.resaltado
             cv2.circle(self.buf, _p(x, y), int((max(r, 12.0) + 8) * 16), (255, 255, 255), 1, cv2.LINE_AA, 4)
@@ -288,15 +343,13 @@ class Escena:
             quiz.dibujar(self, t)
         if estado.activo and not comparando and fase is None:
             self._barra_zoom(log_escala, estado.zoom_agarrado)
-        menu = info.get("menu")
         if menu is not None:
             menu.dibujar(self)
         self._manos(estado)
         if ver_camara and frame is not None:
-            self._camara(frame, estado)
+            self._camara(frame, estado, n_int)
         if ficha_visible and not comparando:
-            self._ficha(*ficha)
-        quiz_activo = bool(modos and modos[3].activo)         # su panel va arriba: el HUD de arriba se aparta
+            self.ui.panel_astro(self.buf, *ficha)
         self._hud(log_escala, giro, inclinacion, estado, info, ver_info, modo, comparando or quiz_activo)
         self._avisos(estado, t)
         if self._fundido is not None:
@@ -438,135 +491,6 @@ class Escena:
                 actual = prueba
         return renglones + ([actual] if actual else [])
 
-    def _ficha_diseno(self, nombre):
-        """-> (caja (x0, y0, x1, y1), renglones) de la ficha compacta en la esquina."""
-        if nombre in self._fichas_cache:
-            return self._fichas_cache[nombre]
-        f = FICHAS[nombre]
-        W, pad = min(C.FICHA_ANCHO, 320), 14
-        col = max(self.medir_texto(e, 12, True)[0] for e, _ in f["filas"]) + 12
-        filas = [(e, self._envolver(v, 12, W - 2 * pad - col - 6)) for e, v in f["filas"]]
-        tipo = self._envolver(f["tipo"], 12, W - 2 * pad - 6)
-        dato = self._envolver(f["dato"], 12, W - 2 * pad - 14)
-
-        alto_filas = sum(17 * len(v) + 4 for _, v in filas)
-        alto_dato = 16 * len(dato) + 32
-        alto = pad + 26 + 16 * len(tipo) + 12 + alto_filas + 8 + alto_dato + pad
-
-        x0, y1 = 84, self.h - 86                 # esquina inferior izquierda, sin tocar zoom ni planeta
-        caja = (x0, max(y1 - alto, 80), x0 + W, y1)
-        self._fichas_cache[nombre] = (caja, (col, tipo, filas, dato))
-        return self._fichas_cache[nombre]
-
-    def _ficha_sprite(self, nombre):
-        """La ficha ya compuesta, una vez por astro: (1 - alfa) y color premultiplicado (float32).
-        Se dibuja sobre negro y sobre blanco: de la diferencia sale la transparencia de cada pixel."""
-        clave = ("sprite", nombre)
-        if clave not in self._fichas_cache:
-            (x0, y0, x1, y1), _ = self._ficha_diseno(nombre)
-            negro = np.zeros((y1 - y0, x1 - x0, 3), np.uint8)
-            blanco = np.full_like(negro, 255)
-            for lienzo in (negro, blanco):
-                self._ficha_en(lienzo, nombre)
-            inv = (blanco.astype(np.float32) - negro.astype(np.float32)) / 255.0
-            self._fichas_cache[clave] = (inv, negro.astype(np.float32))
-        return self._fichas_cache[clave]
-
-    def _ficha_en(self, lienzo, nombre):
-        """Dibuja la ficha con esquinas redondeadas, barra de color del astro y píldora '¿Sabías que...?'."""
-        _, (col, tipo, filas, dato) = self._ficha_diseno(nombre)
-        H, W = lienzo.shape[:2]
-        pad, T = 14, self.texto
-        acento = tuple(int(c) for c in S.COLORES.get(nombre, COL_DER))   # color del astro (BGR)
-
-        # Máscara con esquinas redondeadas
-        m_img = T.Image.new("L", (W, H), 0)
-        T.ImageDraw.Draw(m_img).rounded_rectangle((0, 0, W - 1, H - 1), radius=14, fill=255)
-        masc = (np.asarray(m_img, np.float32) / 255.0)[..., None]
-
-        # Fondo azul espacial oscuro con 92% de opacidad
-        fondo_card = np.full((H, W, 3), (32, 20, 14), np.float32)
-        mezcla = lienzo.astype(np.float32) * (1.0 - 0.92 * masc) + fondo_card * (0.92 * masc)
-        lienzo[:] = np.clip(mezcla, 0, 255).astype(np.uint8)
-
-        # Barra lateral gruesa del color del planeta (como en la imagen)
-        barra = lienzo.copy()
-        cv2.rectangle(barra, (10, 14), (18, H - 14), acento, -1, cv2.LINE_AA)
-        lienzo[:] = np.where(masc > 0.5, barra, lienzo)
-
-        # Borde redondeado luminoso tintado con el color del astro
-        b_img = T.Image.new("L", (W, H), 0)
-        T.ImageDraw.Draw(b_img).rounded_rectangle((0, 0, W - 1, H - 1), radius=14, outline=255, width=2)
-        borde_m = (np.asarray(b_img, np.float32) / 255.0)[..., None] * 0.78
-        col_borde = np.array([min(int(c * 0.85 + 45), 255) for c in acento], np.float32)
-        lienzo[:] = np.clip(lienzo.astype(np.float32) * (1.0 - borde_m) + col_borde * borde_m, 0, 255).astype(np.uint8)
-
-        # Encabezado
-        x_txt = pad + 12
-        y = pad
-        T.dibujar(lienzo, NOMBRES.get(nombre, nombre), x_txt, y, 21, COL_TEXTO, True)
-        y += 26
-        for renglon in tipo:
-            T.dibujar(lienzo, renglon, x_txt, y, 12, acento, True)
-            y += 16
-
-        # Línea divisoria sutil
-        y += 5
-        cv2.line(lienzo, (x_txt, y), (W - pad, y), (78, 66, 56), 1, cv2.LINE_AA)
-        y += 8
-
-        # Filas de datos
-        for etiqueta, valor in filas:
-            T.dibujar(lienzo, etiqueta, x_txt, y, 12, (165, 185, 205), True)
-            for renglon in valor:
-                T.dibujar(lienzo, renglon, x_txt + col, y, 12, COL_TEXTO)
-                y += 17
-            y += 4
-
-        # Caja inferior con píldora blanca "¿Sabías que...?"
-        y += 4
-        box_h = 16 * len(dato) + 30
-        bx0, by0, bx1, by1 = x_txt - 2, y, W - pad, min(y + box_h, H - pad + 4)
-        if by1 > by0 + 10:
-            roi_d = lienzo[by0:by1, bx0:bx1]
-            cv2.addWeighted(roi_d, 0.48, np.full_like(roi_d, (46, 34, 24)), 0.52, 0, dst=roi_d)
-            cv2.rectangle(lienzo, (bx0, by0), (bx1 - 1, by1 - 1), col_borde.astype(int).tolist(), 1, cv2.LINE_AA)
-
-            # Píldora clara "¿Sabías que...?"
-            pw, ph = 114, 18
-            px0, py0 = bx0 + 8, by0 + 5
-            p_img = T.Image.new("L", (pw, ph), 0)
-            T.ImageDraw.Draw(p_img).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=6, fill=255)
-            pm = (np.asarray(p_img, np.float32) / 255.0)[..., None]
-            roi_p = lienzo[py0:py0 + ph, px0:px0 + pw]
-            if roi_p.shape[:2] == (ph, pw):
-                lienzo[py0:py0 + ph, px0:px0 + pw] = np.clip(
-                    roi_p.astype(np.float32) * (1.0 - pm) + np.array([235, 240, 245], np.float32) * pm,
-                    0, 255
-                ).astype(np.uint8)
-            T.dibujar(lienzo, "¿Sabías que...?", px0 + pw // 2, py0 + 2, 11, (28, 22, 18), True, "c")
-
-            yd = by0 + 27
-            for renglon in dato:
-                T.dibujar(lienzo, renglon, bx0 + 8, yd, 12, (235, 240, 245))
-                yd += 16
-
-    def _ficha(self, nombre, opacidad=1.0):
-        """Ficha educativa abajo a la izquierda, con ligero desenfoque de fondo (cristal)."""
-        if nombre not in FICHAS:
-            return
-        (x0, y0, x1, y1), _ = self._ficha_diseno(nombre)
-        inv, pre = self._ficha_sprite(nombre)
-        roi = self.buf[y0:y1, x0:x1]
-        if opacidad > 0.15:
-            # Desenfoque de fondo (blur) para que las estrellas no distraigan al leer
-            fondo_blur = cv2.GaussianBlur(roi, (15, 15), 0)
-            roi = fondo_blur
-        if opacidad < 0.999:
-            inv = 1.0 - opacidad * (1.0 - inv)
-            pre = pre * opacidad
-        self.buf[y0:y1, x0:x1] = cv2.convertScaleAbs(cv2.add(cv2.multiply(roi.astype(np.float32), inv), pre))
-
     def _seleccion(self, sel):
         """Anillo blanco semitransparente que se llena al dejar la palma sobre un astro."""
         x, y, p = sel
@@ -630,22 +554,11 @@ class Escena:
                 del self._rastros[hid]
 
     def _barra_zoom(self, log_escala, agarrado):
-        b = self.buf
-        x, y0, y1 = 48, int(self.h * 0.28), int(self.h * 0.72)
-        lo, hi = math.log(C.ESCALA_MIN), math.log(C.ESCALA_MAX)
-        col = COL_IZQ if agarrado else tuple(int(c * 0.55) for c in COL_IZQ)
-        cv2.line(b, (x, y0), (x, y1), col, 2, cv2.LINE_AA)
-        for marca in (0.1, 1.0, 5.0):
-            if C.ESCALA_MIN <= marca <= C.ESCALA_MAX:
-                ym = y1 - (math.log(marca) - lo) / (hi - lo) * (y1 - y0)
-                cv2.line(b, (x - 6, int(ym)), (x + 6, int(ym)), col, 1, cv2.LINE_AA)
-                self.texto.dibujar(b, f"×{marca:g}", x + 12, ym - 9, 13, COL_TENUE)
-        yv = y1 - (log_escala - lo) / (hi - lo) * (y1 - y0)
-        cv2.circle(b, _p(x, yv), (9 if agarrado else 7) * 16, COL_IZQ, -1, cv2.LINE_AA, 4)
-        self.texto.dibujar(b, "ZOOM", x, y0 - 30, 14, col, True, "c")
+        self.ui.barra_zoom(self.buf, log_escala, agarrado)
 
-    def _camara(self, frame, estado, ancho=240):
-        alto = int(ancho * frame.shape[0] / frame.shape[1])
+    def _camara(self, frame, estado, n_interruptores=0):
+        ancho = C.UI_PANEL_DER_ANCHO - 16
+        alto = int(ancho * 3 / 4)
         pip = cv2.resize(frame, (ancho, alto), interpolation=cv2.INTER_AREA)
         pip = cv2.convertScaleAbs(pip, alpha=0.55)
         for v in estado.manos:
@@ -658,9 +571,7 @@ class Escena:
         m = C.MARGEN_CAMARA
         cv2.rectangle(pip, (int(m * ancho), int(m * alto)), (int((1 - m) * ancho), int((1 - m) * alto)),
                       (70, 70, 70), 1, cv2.LINE_AA)
-        x0, y0 = self.w - ancho - 16, 46                    # arriba a la derecha, bajo los atajos
-        self.buf[y0:y0 + alto, x0:x0 + ancho] = pip
-        cv2.rectangle(self.buf, (x0, y0), (x0 + ancho, y0 + alto), (90, 90, 90), 1, cv2.LINE_AA)
+        self.ui.camara(self.buf, pip, n_interruptores)
 
     def _lento(self, clave, hz, producir):
         """Texto que cambia en cada cuadro (altitud, fps...): se rehace como mucho `hz` veces por segundo.
@@ -672,50 +583,18 @@ class Escena:
         return v[1]
 
     def _hud(self, log_escala, giro, inclinacion, estado, info, ver_info, modo="astro", comparando=False):
-        b, T = self.buf, self.texto
-        if estado.activo:
-            cv2.circle(b, _p(26, 31), 6 * 16, COL_OK, -1, cv2.LINE_AA, 4)
-            T.dibujar(b, "CONTROL ACTIVO", 40, 19, 18, COL_OK, True)
-        else:
-            cv2.circle(b, _p(26, 31), 6 * 16, COL_GRIS, -1, cv2.LINE_AA, 4)
-            T.dibujar(b, "EN PAUSA", 40, 19, 18, COL_GRIS, True)
-        voz = info.get("voz")                              # estado del microfono (si hay comandos de voz)
-        if voz is not None:
-            col = COL_DER if voz == "escuchando" else COL_GRIS
-            T.dibujar(b, "VOZ: " + voz, 250, 21, 14, col, voz == "escuchando")
-            if voz == "escuchando":                         # barrita de volumen: si no se mueve al hablar, no te oye
-                cv2.rectangle(b, (250, 36), (250 + int(70 * min(max(info.get("voz_nivel", 0.0), 0.0), 1.0)), 40), col, -1)
-        if comparando:                                     # el comparador pone su propio encabezado y ayuda
-            return
-        lon = -math.degrees(giro)
-        lon = (lon + 180.0) % 360.0 - 180.0
-        lado = "O" if lon < 0 else "E"
-        lat = -math.degrees(inclinacion)                   # inclinar hacia arriba = se ve el sur
-        hemi = "S" if lat < -0.5 else "N"
-        alt = self.astros.get("altitud_km", 0.0)
-        if modo == "sistema":
-            T.dibujar(b, f"SISTEMA SOLAR   ·   1 UA = {_km(A.UA_KM)}   ·   inclinación de la vista "
-                         f"{self.astros.get('inclinacion_vista', 0.0):.0f}°   ·   escala {self.astros.get('px_ua', 0.0):.0f} px/UA",
-                      20, 48, 16, COL_TEXTO)
-        else:
-            T.dibujar(b, self._lento(("lugar", modo, self.astros.get("foco")), C.HUD_REFRESCO_HZ,
-                                     lambda: f"{NOMBRES.get(self.astros.get('foco', 'tierra'), '')}   ·   Altitud {_km(alt)}   ·   "
-                                             f"Sobre {abs(lat):.0f}° {hemi}, {abs(lon):.0f}° {lado}"), 20, 48, 16, COL_TEXTO)
-
-        reloj = info.get("reloj")                          # (fecha, velocidad): el control del tiempo
-        if reloj is not None:
-            f, v = reloj
-            T.dibujar(b, f"{texto_fecha(f)}   ·   {texto_velocidad(v)}", self.w - 16, 48, 15,
-                      COL_TENUE if v == 1 else COL_IZQ, v != 1, ancla="d")
-
-        if ver_info:
+        b, ui = self.buf, self.ui
+        ui.barra(b, estado, info, modo, giro, inclinacion)
+        if ver_info:                                       # datos tecnicos (tecla H o el panel de vista)
+            x, y = C.UI_MARGEN + C.UI_PANEL_IZQ_ANCHO + 64, C.UI_BARRA_ALTO + 12
             exp = info.get("exposicion")
+            T = self.texto
             T.dibujar(b, self._lento("depuracion", C.INFO_REFRESCO_HZ, lambda:
                       f"dibujo {info['fps_render']:.0f} fps  ·  cámara {info.get('fps_cam', 0):.0f} fps "
                       f"(exp. {'auto' if exp is None else f'{exp:+.0f}'})  ·  detección {info['fps_det']:.0f} fps "
                       f"({info['lat_ms']:.0f} ms)  ·  giro {estado.omega:+.2f}  incl. {estado.omega_v:+.2f} rad/s  ·  swipe: {estado.swipe}"),
-                      20, 74, 13, COL_TENUE)
-            y = 94
+                      x, y, 11, COL_TENUE)
+            y += 18
             for v in sorted(estado.manos, key=lambda v: v.rol):
                 if not v.visible:
                     continue
@@ -724,26 +603,27 @@ class Escena:
                 T.dibujar(b, self._lento(("mano", v.rol), C.INFO_REFRESCO_HZ, lambda:
                           f"{nombre}: {pose:7s}  puño {v.ratio_puno:.2f} (<{C.PUNO_ON})   "
                           f"ok {v.ratio_ok:.2f} (<{C.OK_ON})   dedos {v.estirados}/3"),
-                          20, y, 13, COL_IZQ if v.rol == "izq" else COL_DER)
-                y += 19
-            T.dibujar(b, "Espacio pausa · R reset · S sistema · C comparar · G gravedad · X corte · K quiz · , . tiempo · T ahora · D ficha · H info · F full · Q salir",
-                      self.w - 16, 22, 11, COL_TENUE, ancla="d")
-
+                          x, y, 11, COL_IZQ if v.rol == "izq" else COL_DER)
+                y += 17
+            T.dibujar(b, "Espacio pausa · R reset · , . tiempo · T ahora · D ficha · V cámara · H datos · F pantalla · Q salir",
+                      x, y, 10, COL_TENUE)
+        if comparando:                                     # comparador y quiz ponen su propia ayuda
+            return
         if estado.activo:
-            msg = ("Izquierda: puño y sube o baja = zoom     ·     Derecha: swipe a los lados = girar, "
-                   "arriba/abajo = inclinar; puño = agarrar     ·     OK = pausa")
+            msg = "Izquierda: puño ↕ = zoom   ·   Derecha: desliza = girar, puño = arrastrar   ·   OK = pausa"
         elif self.astros.get("objetivos"):
-            msg = ("En pausa: deja la palma sobre un astro para viajar a él     ·     "
-                   "S = " + ("volver" if modo == "sistema" else "ver todo el Sistema Solar"))
+            msg = "Palma sobre un astro o un botón = elegirlo   ·   OK = mover la cámara"
         else:
-            msg = "Haz el signo de OK con cualquier mano para activar el control"
-        T.dibujar(b, msg, self.w / 2, self.h - 40, 17 if not estado.activo else 15, COL_TEXTO, ancla="c")
-        T.dibujar(b, "Ratón / touchpad: arrastrar = girar e inclinar  ·  rueda o dos dedos = zoom  ·  clic en un astro = viajar",
-                  self.w / 2, self.h - 66, 13, COL_TENUE, ancla="c")
+            msg = "Haz el signo de OK con la mano para empezar"
+        menu = info.get("menu")
+        tope = getattr(menu, "tope", None) or (self.h - C.UI_MARGEN - C.UI_BOTON_ALTO)
+        self.ui.ayuda(b, msg, tope - 26)
 
     def _avisos(self, estado, t):
-        for i, (texto, t0) in enumerate(estado.avisos[-1:]):
+        for texto, t0 in estado.avisos[-1:]:
             edad = t - t0
             op = 1.0 if edad < 1.2 else max(0.0, 1.0 - (edad - 1.2) / 0.8)
-            col = COL_OK if "activ" in texto.lower() and "pausa" not in texto.lower() else COL_TEXTO
-            self.texto.dibujar(self.buf, texto, self.w / 2, self.h - 104, 30, col, True, "c", op)
+            if op <= 0.0:
+                continue
+            col = (130, 214, 128) if "activ" in texto.lower() and "pausa" not in texto.lower() else COL_TEXTO
+            self.ui.aviso(self.buf, texto, op, col)
