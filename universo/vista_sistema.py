@@ -91,6 +91,8 @@ class VistaSistema:
         for d, n, x, y, P in sorted(proyectados, key=lambda k: k[0]):
             activo = n == "sol" or n in C.PLANETAS_ACTIVOS
             r = rs if n == "sol" else rp
+            if activo and n in cuerpos and n != "sol":                   # los grandes se ven mas grandes (suave)
+                r = rp * float(np.clip(S.radio_rt(n) ** 0.3, 0.7, 2.2))
             if n == "sol":
                 self._brillo(buf, x, y)
             if activo and n in cuerpos:

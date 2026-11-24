@@ -61,6 +61,15 @@ FISICOS = {
                   # las nubes "superrotan": dan la vuelta en ~4 dias (vientos de ~100 m/s), en el mismo sentido
                   w_nubes=(160.20, -360.0 / 4.0)),
     "marte": dict(radio_km=3389.5, ra=(317.68143, -0.1061), dec=(52.88650, -0.0609), w=(176.630, 350.89198226)),
+    # Jupiter: radio medio (el real es ~7 % mas ancho en el ecuador); sistema III, una vuelta cada 9 h 55 min
+    # Saturno: radio medio (el ecuatorial es ~10 % mayor); sistema III, una vuelta cada 10 h 39 min; los anillos: anillos.py
+    "saturno": dict(radio_km=58232.0, ra=(40.589, -0.036), dec=(83.537, -0.004), w=(38.90, 810.7939024)),
+    # Urano: radio medio; su polo norte IAU apunta casi a la eclíptica (inclinacion 97.8 grados) y gira al reves
+    # (W decrece), una vuelta cada 17 h 14 min
+    "urano": dict(radio_km=25362.0, ra=(257.311, 0.0), dec=(-15.175, 0.0), w=(203.81, -501.1600928)),
+    # Neptuno: radio medio; polo y meridiano IAU (2015) sin los terminos periodicos (<1 grado); una vuelta cada 16 h 6 min
+    "neptuno": dict(radio_km=24622.0, ra=(299.36, 0.0), dec=(43.46, 0.0), w=(249.978, 536.3128492)),
+    "jupiter": dict(radio_km=69911.0, ra=(268.056595, -0.006499), dec=(64.495303, 0.002413), w=(284.95, 870.5360000)),
 }
 
 

@@ -1,10 +1,10 @@
-"""Texturas de respaldo de Mercurio, Venus, Marte y el Sol, generadas con numpy/OpenCV.
+"""Texturas de respaldo de Mercurio, Venus, Marte, Jupiter, Saturno y el Sol, generadas con numpy/OpenCV.
 
 Sirven mientras no pongas las imagenes reales de la NASA en assets/ (mira
 herramientas/descargar_texturas.py). Marte lleva sus rasgos reales en su sitio (Syrtis Major,
 Valles Marineris, Olympus Mons, Hellas, Solis Lacus, los casquetes polares...); Mercurio, sus
 cuencas (Caloris, Rembrandt, Beethoven...) y sus crateres con rayos (Hokusai, Kuiper...); Venus,
-sus nubes en bandas con la "Y" oscura y los collares polares; el Sol, granulacion y manchas. Son equirectangulares (longitud 0 al centro, este a la derecha), igual que las de la NASA.
+sus nubes en bandas con la "Y" oscura y los collares polares; Jupiter, sus cinturones y zonas con la Gran Mancha Roja; Saturno, sus bandas doradas suaves y el hexagono del polo norte; el Sol, granulacion y manchas. Son equirectangulares (longitud 0 al centro, este a la derecha), igual que las de la NASA.
 
 Generar los archivos (una sola vez):   python -m universo.planetas   (o solo uno: ... planetas mercurio)
 """
@@ -362,6 +362,190 @@ def textura_venus(ancho=2048, semilla=41, verbose=False):
 
 
 # ----------------------------------------------------------------------
+# Jupiter (las nubes: cinturones oscuros y zonas claras, la Gran Mancha Roja y sus ovalos)
+# ----------------------------------------------------------------------
+_JUP_ZONA = np.array([204, 228, 238], np.float32)             # BGR: crema
+_JUP_CINTURON = np.array([72, 112, 172], np.float32)          # BGR: marron anaranjado
+_JUP_POLO = np.array([150, 158, 168], np.float32)             # BGR: gris pardo de los polos
+_JUP_ROJO = np.array([55, 85, 190], np.float32)               # BGR: rojo ladrillo (la Gran Mancha)
+# (latitud, oscuridad 0..1): 0 = zona clara, 1 = cinturon oscuro (NTB, NEB, SEB, STB... con su zona entre ellos)
+_JUP_PERFIL = [(-90, 0.50), (-70, 0.60), (-60, 0.42), (-50, 0.25), (-44, 0.55), (-39, 0.20), (-34, 0.60),
+               (-29, 0.18), (-24, 0.35), (-19, 0.85), (-13, 0.95), (-8, 0.62), (-4, 0.12), (0, 0.04),
+               (4, 0.10), (8, 0.55), (13, 0.95), (17, 0.88), (21, 0.30), (25, 0.65), (29, 0.20),
+               (36, 0.50), (42, 0.18), (50, 0.40), (60, 0.50), (72, 0.62), (90, 0.52)]
+_JUP_PERFIL = np.array(_JUP_PERFIL, np.float32)
+_JUP_OVALOS = [(-33.0, -58.0, 1.0), (-33.0, 95.0, 0.9), (-33.0, 150.0, 0.8), (-41.0, 40.0, 0.7), (-41.0, -130.0, 0.7)]
+
+
+def textura_jupiter(ancho=2048, semilla=23, verbose=False):
+    """Nubes de Jupiter (BGR uint8): cinturones y zonas con bordes ondulados y vientos que las estiran,
+    festones en el ecuador, la Gran Mancha Roja (22 grados sur) y ovalos blancos."""
+    alto = ancho // 2
+
+    def nubes(n, lat, lon):
+        la = np.radians(lat)
+        ondas = _fbm(n, 2.4, 4, 0.55, desplaza=31.0).reshape(lat.shape)
+        # remolinos: la longitud se tuerce mas donde hay cortante entre cinturon y zona (cerca de los bordes)
+        cortante = np.abs(np.gradient(np.interp(lat, _JUP_PERFIL[:, 0], _JUP_PERFIL[:, 1]), axis=0)) * 60.0
+        lo = np.radians(lon) + 0.9 * ondas * np.clip(0.25 + cortante, 0.0, 1.0)
+        # corrientes en chorro: el ruido se estira mucho en longitud (los vientos cambian con la latitud)
+        q = np.stack([np.cos(la) * np.cos(lo), np.cos(la) * np.sin(lo), np.sin(la) * 6.0], -1).reshape(-1, 3)
+        rayas = _fbm(q.astype(np.float32), 3.2, 6, 0.62).reshape(lat.shape)
+        q2 = np.stack([np.cos(la) * np.cos(lo), np.cos(la) * np.sin(lo), np.sin(la) * 2.5], -1).reshape(-1, 3)
+        grumos = _fbm(q2.astype(np.float32) * 5.0, 3.0, 4, 0.6, desplaza=9.0).reshape(lat.shape)
+        # el borde de cada cinturon serpentea: se busca la oscuridad en una latitud desplazada
+        borde = 1.0 + 2.2 * np.exp(-((np.abs(lat) - 9.0) / 5.0) ** 2)      # mas fuerte en los bordes del ecuador
+        lat_w = lat + (2.2 * ondas + 1.2 * rayas) * borde
+        osc = np.interp(lat_w, _JUP_PERFIL[:, 0], _JUP_PERFIL[:, 1])
+        osc = osc + 0.20 * rayas + 0.22 * grumos * (0.4 + osc)
+        # festones: lengüetas oscuras que salen del cinturon ecuatorial norte hacia la zona clara
+        feston = np.exp(-((lat - 6.5) / 2.2) ** 2) * np.clip(np.sin(np.radians(lon) * 11.0 + 3.0 * ondas), 0, 1)
+        osc = osc + 0.35 * feston
+        return osc
+
+    if verbose:
+        print("  nubes...", flush=True)
+    osc = np.clip(_por_filas(ancho, alto, nubes), 0.0, 1.0) ** 1.15
+
+    lat = (90.0 - (np.arange(alto) + 0.5) / alto * 180.0).astype(np.float32)[:, None] * np.ones((1, ancho), np.float32)
+    lon = ((np.arange(ancho) + 0.5) / ancho * 360.0 - 180.0).astype(np.float32)[None, :] * np.ones((alto, 1), np.float32)
+    ala = np.zeros((alto, ancho), np.float32)
+    # Gran Mancha Roja: nucleo rojo, halo claro alrededor y estela turbulenta hacia el oeste
+    nucleo = _mancha(lat, lon, -22.0, 20.0, 5.2, 11.0)
+    halo = np.clip(_mancha(lat, lon, -22.0, 20.0, 8.5, 17.5) - nucleo, 0.0, 1.0)
+    estela = _mancha(lat, lon, -22.0, 6.0, 4.5, 22.0)
+    osc = osc * (1.0 - 0.75 * halo) + 0.25 * estela * (0.5 + 0.5 * np.sin(np.radians(lon) * 17.0))
+    osc = np.clip(osc, 0.0, 1.0)
+    rojo = nucleo ** 0.7
+    ovalos = np.zeros((alto, ancho), np.float32)
+    for la0, lo0, k in _JUP_OVALOS:
+        ovalos = np.maximum(ovalos, k * _mancha(lat, lon, la0, lo0, 2.2 * k, 3.8 * k))
+
+    polo = _suave(55.0, 80.0, np.abs(lat))
+    t = osc[..., None]
+    color = _JUP_ZONA * (1 - t) + _JUP_CINTURON * t
+    color = color * (1 - 0.55 * polo[..., None]) + _JUP_POLO * 0.55 * polo[..., None] * (0.75 + 0.25 * (1 - t))
+    color = color * (1 - rojo[..., None]) + _JUP_ROJO * rojo[..., None]
+    color = color * (1 - 0.8 * ovalos[..., None]) + _JUP_ZONA * 1.04 * 0.8 * ovalos[..., None]
+    color = cv2.GaussianBlur(color, (0, 0), ancho / 4000.0)     # las nubes no tienen bordes duros
+    return np.clip(color, 0, 255).astype(np.uint8)
+
+
+# ----------------------------------------------------------------------
+# Saturno (bandas doradas muy suaves, tormentas pequenas y el hexagono del polo norte; los anillos: anillos.py)
+# ----------------------------------------------------------------------
+_SAT_ZONA = np.array([150, 205, 232], np.float32)             # BGR: crema dorado
+_SAT_BANDA = np.array([108, 158, 198], np.float32)            # BGR: ocre
+_SAT_POLO = np.array([128, 150, 150], np.float32)             # BGR: gris verdoso (polos)
+_SAT_PERFIL = np.array([(-90, 0.60), (-75, 0.55), (-62, 0.45), (-52, 0.22), (-42, 0.40), (-34, 0.12), (-24, 0.42),
+                        (-16, 0.18), (-7, 0.38), (0, 0.08), (7, 0.30), (15, 0.16), (24, 0.45), (34, 0.14),
+                        (44, 0.40), (56, 0.26), (66, 0.46), (78, 0.55), (90, 0.60)], np.float32)
+
+
+def textura_saturno(ancho=2048, semilla=29, verbose=False):
+    """Nubes de Saturno (BGR uint8): bandas doradas de poco contraste, estrias, tormentas y el hexagono polar."""
+    alto = ancho // 2
+
+    def nubes(n, lat, lon):
+        la = np.radians(lat)
+        ondas = _fbm(n, 2.2, 4, 0.5, desplaza=13.0).reshape(lat.shape)
+        lo = np.radians(lon) + 0.5 * ondas
+        q = np.stack([np.cos(la) * np.cos(lo), np.cos(la) * np.sin(lo), np.sin(la) * 8.0], -1).reshape(-1, 3)
+        rayas = _fbm(q.astype(np.float32), 3.0, 5, 0.6).reshape(lat.shape)
+        lat_w = lat + 1.2 * ondas + 0.6 * rayas
+        osc = np.interp(lat_w, _SAT_PERFIL[:, 0], _SAT_PERFIL[:, 1]) + 0.10 * rayas
+        # tormentas: manchas claras alargadas en el hemisferio norte (como la "Gran Mancha Blanca")
+        for la0, lo0, r in ((32.0, 40.0, 1.0), (40.0, -120.0, 0.6), (-38.0, 150.0, 0.5)):
+            osc = osc - 0.45 * r * _mancha(lat, lon, la0, lo0, 2.4 * r, 7.0 * r, alabeo=ondas)
+        # el hexagono del polo norte: la corriente en chorro (lat ~78) forma 6 lados
+        hexa = 78.5 + 1.6 * np.cos(np.radians(lon) * 6.0)
+        osc = osc + 0.28 * np.exp(-((lat - hexa) / 1.4) ** 2) - 0.10 * _suave(hexa, 90.0, lat)
+        return osc
+
+    if verbose:
+        print("  nubes...", flush=True)
+    osc = np.clip(_por_filas(ancho, alto, nubes), 0.0, 1.0)
+    lat = (90.0 - (np.arange(alto) + 0.5) / alto * 180.0).astype(np.float32)[:, None]
+    polo = _suave(62.0, 88.0, np.abs(lat)) * np.ones((1, ancho), np.float32)
+    t = osc[..., None]
+    color = _SAT_ZONA * (1 - t) + _SAT_BANDA * t
+    color = color * (1 - 0.50 * polo[..., None]) + _SAT_POLO * 0.50 * polo[..., None]
+    color = cv2.GaussianBlur(color, (0, 0), ancho / 4000.0)
+    return np.clip(color, 0, 255).astype(np.uint8)
+
+
+# ----------------------------------------------------------------------
+# Urano (casi liso: cian palido con bandas muy tenues y casquete polar mas claro)
+# ----------------------------------------------------------------------
+_URA_CLARO = np.array([196, 192, 138], np.float32)            # BGR: cian palido
+_URA_OSCURO = np.array([172, 170, 118], np.float32)           # BGR: cian algo mas oscuro
+
+
+def textura_urano(ancho=2048, semilla=37, verbose=False):
+    """Atmosfera de Urano (BGR uint8): bandas casi invisibles y el casquete polar (sur) mas brillante."""
+    alto = ancho // 2
+
+    def nubes(n, lat, lon):
+        la = np.radians(lat)
+        ondas = _fbm(n, 2.0, 3, 0.5, desplaza=7.0).reshape(lat.shape)
+        lat_w = lat + 1.5 * ondas
+        bandas = 0.5 + 0.5 * np.sin(np.radians(lat_w) * 7.0 + 0.8)
+        q = np.stack([np.cos(la) * np.cos(np.radians(lon)), np.cos(la) * np.sin(np.radians(lon)), np.sin(la) * 6.0], -1).reshape(-1, 3)
+        rayas = _fbm(q.astype(np.float32), 4.0, 4, 0.55).reshape(lat.shape)
+        return 0.55 * bandas + 0.35 * rayas + 0.10 * np.clip(lat / 90.0, -1, 1)
+
+    if verbose:
+        print("  nubes...", flush=True)
+    t = np.clip(_por_filas(ancho, alto, nubes), 0.0, 1.0)[..., None]
+    lat = (90.0 - (np.arange(alto) + 0.5) / alto * 180.0).astype(np.float32)[:, None]
+    capa = _suave(-45.0, -75.0, lat) * np.ones((1, ancho), np.float32)       # casquete polar sur, mas claro
+    color = _URA_CLARO * (1 - 0.55 * t) + _URA_OSCURO * 0.55 * t
+    color = color * (1 - 0.35 * capa[..., None]) + np.array([208, 204, 160], np.float32) * 0.35 * capa[..., None]
+    color = cv2.GaussianBlur(color, (0, 0), ancho / 3000.0)
+    return np.clip(color, 0, 255).astype(np.uint8)
+
+
+# ----------------------------------------------------------------------
+# Neptuno (azul profundo, bandas suaves, Gran Mancha Oscura y nubes de cirro blancas)
+# ----------------------------------------------------------------------
+_NEP_CLARO = np.array([215, 125, 80], np.float32)             # BGR: azul medio
+_NEP_OSCURO = np.array([160, 70, 40], np.float32)             # BGR: azul profundo
+
+
+def textura_neptuno(ancho=2048, semilla=41, verbose=False):
+    """Atmosfera de Neptuno (BGR uint8): bandas azules, Gran Mancha Oscura, cirros blancos alargados."""
+    alto = ancho // 2
+
+    def nubes(n, lat, lon):
+        la = np.radians(lat)
+        ondas = _fbm(n, 2.4, 4, 0.5, desplaza=9.0).reshape(lat.shape)
+        lat_w = lat + 2.0 * ondas
+        bandas = 0.5 + 0.5 * np.sin(np.radians(lat_w) * 5.0 + 0.3)
+        q = np.stack([np.cos(la) * np.cos(np.radians(lon)), np.cos(la) * np.sin(np.radians(lon)), np.sin(la) * 7.0], -1).reshape(-1, 3)
+        rayas = _fbm(q.astype(np.float32), 3.5, 5, 0.55).reshape(lat.shape)
+        osc = 0.45 * bandas + 0.35 * rayas
+        osc = osc + 0.55 * _mancha(lat, lon, -22.0, 20.0, 6.0, 12.0, alabeo=ondas)             # Gran Mancha Oscura
+        return osc
+
+    def cirros(n, lat, lon):
+        la = np.radians(lat)
+        ondas = _fbm(n, 2.0, 3, 0.5, desplaza=5.0).reshape(lat.shape)
+        q = np.stack([np.cos(la) * np.cos(np.radians(lon)), np.cos(la) * np.sin(np.radians(lon)), np.sin(la) * 16.0], -1).reshape(-1, 3)
+        f = _fbm(q.astype(np.float32), 4.0, 4, 0.6).reshape(lat.shape)
+        franja = np.exp(-((np.abs(lat + 30.0) - 6.0) / 5.0) ** 2) + 0.7 * np.exp(-((lat - 40.0) / 6.0) ** 2)
+        return np.clip((f - 0.55) * 4.0, 0.0, 1.0) * franja + 0.9 * _mancha(lat, lon, -42.0, 30.0, 1.5, 6.0, alabeo=ondas)
+
+    if verbose:
+        print("  nubes...", flush=True)
+    t = np.clip(_por_filas(ancho, alto, nubes), 0.0, 1.0)[..., None]
+    c = np.clip(_por_filas(ancho, alto, cirros), 0.0, 1.0)[..., None]
+    color = _NEP_CLARO * (1 - t) + _NEP_OSCURO * t
+    color = color * (1 - 0.7 * c) + np.array([245, 235, 225], np.float32) * 0.7 * c
+    color = cv2.GaussianBlur(color, (0, 0), ancho / 3500.0)
+    return np.clip(color, 0, 255).astype(np.uint8)
+
+
+# ----------------------------------------------------------------------
 # Sol
 # ----------------------------------------------------------------------
 _MANCHAS_SOL = [(14, -40, 3.2), (-11, 15, 2.4), (18, 80, 2.0), (-16, 130, 2.8), (9, -125, 1.6),
@@ -399,6 +583,10 @@ def generar(carpeta, verbose=True, solo=None):
     for nombre, f, kw in (("mercurio_procedural.jpg", textura_mercurio, dict(ancho=4096)),
                           ("venus_procedural.jpg", textura_venus, dict(ancho=2048)),
                           ("marte_procedural.jpg", textura_marte, dict(ancho=4096)),
+                          ("jupiter_procedural.jpg", textura_jupiter, dict(ancho=2048)),
+                          ("saturno_procedural.jpg", textura_saturno, dict(ancho=2048)),
+                          ("urano_procedural.jpg", textura_urano, dict(ancho=2048)),
+                          ("neptuno_procedural.jpg", textura_neptuno, dict(ancho=2048)),
                           ("sol_procedural.jpg", textura_sol, dict(ancho=2048))):
         if solo and nombre.split("_")[0] not in solo:
             continue

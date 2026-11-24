@@ -51,9 +51,9 @@ ARCHIVOS
   universo/control.py        activacion con OK, zoom, giro e inclinacion con swipe e inercia
   universo/astros.py         posiciones reales del Sol, la Luna y las estrellas; la camara en orbita
   universo/sistema.py        los planetas: orbitas, posiciones y rotacion reales
-  universo/planetas.py       texturas procedurales de Mercurio, Venus, Marte y el Sol (respaldo)
+  universo/planetas.py       texturas procedurales de Mercurio, Venus, Marte, Jupiter y el Sol (respaldo)
   universo/vista_sistema.py  la vista del Sistema Solar completo
-  herramientas/              descargar_texturas.py (texturas reales de Mercurio, Venus y Marte)
+  herramientas/              descargar_texturas.py (texturas reales de Mercurio, Venus, Marte y Jupiter)
   universo/cielo.py          Via Lactea, estrellas, Sol y Luna
   universo/tierra.py         la Tierra con el dia y la noche reales y las luces de las ciudades
   universo/render.py         orden de dibujo, guias de las manos, textos, camara en miniatura
@@ -65,12 +65,21 @@ RATON O TOUCHPAD (sin usar las manos)
   Arrastrar con el boton izquierdo = girar e inclinar | rueda o dos dedos = zoom
   Clic sobre un astro = viajar a el | en la vista del sistema, clic en el astro actual = volver
 
-MERCURIO, VENUS, MARTE, EL SOL Y EL SISTEMA SOLAR
+MERCURIO, VENUS, MARTE, JUPITER, SATURNO, URANO, NEPTUNO, EL SOL Y EL SISTEMA SOLAR
   - En pausa, deja la palma sobre un astro (un punto, como Marte desde la Tierra) hasta
-    que se llene el anillo: viajas a el. Con Mercurio, Venus, Marte y el Sol funcionan igual
+    que se llene el anillo: viajas a el. Con Mercurio, Venus, Marte, Jupiter, Saturno, Urano, Neptuno y el Sol funcionan igual
     los gestos que con la Tierra: zoom, girar e inclinar.
   - Venus se ve con sus nubes (su superficie no se ve desde el espacio) y gira al reves que
     los demas planetas, muy despacio: un dia de Venus dura 243 dias terrestres.
+  - Jupiter es el planeta mas grande (cabrian mas de 1 300 Tierras dentro) y gira en solo 10 horas:
+    se ve con sus cinturones de nubes y la Gran Mancha Roja. Aun no tiene sus lunas.
+  - Saturno se ve con sus anillos (division de Cassini, hueco de Encke), que proyectan sombra
+    sobre el planeta y reciben la suya. Si lo ves de canto casi desaparecen: pasa cada ~15 anos.
+    Aun no tiene sus lunas ni su achatamiento.
+  - Urano gira "acostado" (su eje esta inclinado casi 98 grados) y al reves: cada polo pasa
+    42 anos seguidos de dia y 42 de noche. Se ve cian por el metano de su atmosfera.
+  - Neptuno es azul intenso y tiene los vientos mas rapidos del Sistema Solar (2 000 km/h).
+    Tarda 165 anos en dar una vuelta al Sol: desde su descubrimiento (1846) completo una.
   - Mercurio y Venus nunca se alejan mucho del Sol en el cielo de la Tierra (28 y 47 grados).
   - Tecla S: ves todo el Sistema Solar desde arriba. Zoom con la mano izquierda, gira o
     inclina la vista con la derecha. Palma sobre un astro = viajar a el; sobre el astro donde
@@ -91,4 +100,4 @@ CREDITOS
   Luces de noche: NASA Earth Observatory, Black Marble 2016 (dominio publico).
   Mercurio (si la descargas): NASA/JHU APL/Carnegie Institution of Washington, MESSENGER (PIA15063).
   Nubes de Venus (si la descargas): Solar System Scope, www.solarsystemscope.com/textures,
-  licencia Creative Commons Atribucion 4.0 (CC BY 4.0).
+  licencia Creative Commons Atribucion 4.0 (CC BY 4.0). Lo mismo para las nubes de Jupiter, Saturno, Urano y Neptuno (si las descargas).

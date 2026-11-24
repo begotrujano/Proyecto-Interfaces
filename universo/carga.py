@@ -23,9 +23,10 @@ from universo.tierra import Tierra
 class AstroBajoDemanda:
     """Se usa igual que un Tierra (iluminar, dibujar) pero carga sus texturas cuando hacen falta."""
 
-    def __init__(self, nombre, ruta, generar, color, ancho_respaldo=2048, al_pedir=None, **kw):
-        """generar(ancho) -> textura procedural de respaldo; kw: argumentos de Tierra (atmosfera...)."""
-        self.nombre, self.ruta, self.generar, self.color = nombre, ruta, generar, color
+    def __init__(self, nombre, ruta, generar, color, ancho_respaldo=2048, al_pedir=None, clase=Tierra, **kw):
+        """generar(ancho) -> textura procedural de respaldo; clase: Tierra o una subclase (Saturno, con anillos);
+        kw: argumentos de Tierra (atmosfera...)."""
+        self.nombre, self.ruta, self.generar, self.color, self.clase = nombre, ruta, generar, color, clase
         self.ancho_respaldo, self.kw, self.al_pedir = ancho_respaldo, kw, al_pedir
         self.chico = None
         self.grande = None
@@ -61,7 +62,7 @@ class AstroBajoDemanda:
 
     def _cargar_chico(self):
         a = C.ICONO_ANCHO
-        t = Tierra(self.ruta, R=int(C.ICONO_RADIO_MAX) + 6, ancho_max=a,
+        t = self.clase(self.ruta, R=int(C.ICONO_RADIO_MAX) + 6, ancho_max=a,
                    respaldo=lambda: self.generar(a), **self.kw)
         if self._sol is not None:
             t.iluminar(self._sol, esperar=True)
@@ -86,7 +87,7 @@ class AstroBajoDemanda:
             self._hilo.join()
 
     def _cargar_grande(self, gen):
-        t = Tierra(self.ruta, respaldo=lambda: self.generar(self.ancho_respaldo), **self.kw)
+        t = self.clase(self.ruta, respaldo=lambda: self.generar(self.ancho_respaldo), **self.kw)
         if self._sol is not None:
             t.iluminar(self._sol, esperar=True)           # la luz se hornea aqui, no en el dibujo
         if self.quiere_planas:

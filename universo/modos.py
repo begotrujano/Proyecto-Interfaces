@@ -15,6 +15,7 @@ import numpy as np
 from universo import astros as A
 from universo import config as C
 from universo import sistema as S
+from universo.anillos import FACTOR_EXTERIOR
 from universo.manos import a_lienzo
 
 COL_TEXTO = (240, 240, 240)
@@ -74,6 +75,44 @@ DATOS_EDU = {
             (0.22, (80, 160, 235), "Pequeño corazón de hierro"),
         ],
     ),
+    "jupiter": dict(
+        radio_km=69911.0,
+        gravedad=24.79,
+        capas=[
+            (1.00, (150, 195, 230), "Nubes de amoníaco y gas de hidrógeno"),
+            (0.97, (70, 125, 205), "Océano de hidrógeno líquido"),
+            (0.80, (60, 160, 245), "Hidrógeno metálico que conduce la electricidad"),
+            (0.20, (215, 245, 255), "Núcleo denso de roca y hielo"),
+        ],
+    ),
+    "urano": dict(
+        radio_km=25362.0,
+        gravedad=8.69,
+        capas=[
+            (1.00, (230, 225, 170), "Hidrógeno, helio y metano: el metano le da su color cian"),
+            (0.80, (200, 160, 90), "Manto de agua, amoníaco y metano helados"),
+            (0.20, (215, 245, 255), "Núcleo pequeño de roca y hierro"),
+        ],
+    ),
+    "neptuno": dict(
+        radio_km=24622.0,
+        gravedad=11.15,
+        capas=[
+            (1.00, (230, 140, 70), "Hidrógeno, helio y metano: el metano lo vuelve azul"),
+            (0.80, (200, 160, 90), "Manto de agua, amoníaco y metano helados"),
+            (0.25, (215, 245, 255), "Núcleo de roca y hierro"),
+        ],
+    ),
+    "saturno": dict(
+        radio_km=58232.0,
+        gravedad=10.44,
+        capas=[
+            (1.00, (140, 200, 235), "Nubes doradas de amoníaco"),
+            (0.95, (80, 140, 205), "Hidrógeno y helio líquidos"),
+            (0.55, (60, 160, 245), "Hidrógeno metálico"),
+            (0.18, (215, 245, 255), "Núcleo de roca y hielo"),
+        ],
+    ),
     "marte": dict(
         radio_km=3389.5,
         gravedad=3.71,
@@ -91,11 +130,15 @@ PARES_DEMO = [
     ("tierra", "luna"),
     ("tierra", "venus"),
     ("tierra", "mercurio"),
+    ("tierra", "jupiter"),
+    ("jupiter", "saturno"),
     ("sol", "tierra"),
+    ("sol", "jupiter"),
 ]
 
-for _i, _a in enumerate(["sol", "mercurio", "venus", "tierra", "luna", "marte"]):     # y el resto de combinaciones
-    for _b in ["sol", "mercurio", "venus", "tierra", "luna", "marte"][_i + 1:]:
+_ASTROS_COMP = ["sol", "mercurio", "venus", "tierra", "luna", "marte", "jupiter", "saturno", "urano", "neptuno"]
+for _i, _a in enumerate(_ASTROS_COMP):                                                 # y el resto de combinaciones
+    for _b in _ASTROS_COMP[_i + 1:]:
         if (_a, _b) not in PARES_DEMO and (_b, _a) not in PARES_DEMO:
             PARES_DEMO.append((_a, _b))
 
@@ -108,6 +151,13 @@ PREGUNTAS_QUIZ = [
     ("¿En qué planeta vivimos y hay océanos con vida?", "tierra", "¡Correcto! Es nuestro hogar espacial."),
     ("¿Qué planeta tiene el volcán más grande de todos?", "marte", "¡Bravo! Se llama Monte Olimpo."),
     ("¿Cuál es el planeta más chiquito y veloz?", "mercurio", "¡Así es! Da la vuelta al Sol en solo 88 días."),
+    ("¿Cuál es el planeta más grande del Sistema Solar?", "jupiter", "¡Correcto! Dentro de Júpiter cabrían más de mil Tierras."),
+    ("¿Qué planeta tiene una tormenta gigante llamada la Gran Mancha Roja?", "jupiter",
+     "¡Exacto! Es una tormenta más grande que la Tierra y dura siglos."),
+    ("¿Qué planeta tiene los vientos más rápidos del Sistema Solar?", "neptuno", "¡Exacto! Neptuno tiene vientos de hasta 2 000 km/h."),
+    ("¿Qué planeta gira «acostado», con su eje casi paralelo a su órbita?", "urano", "¡Correcto! Urano rueda de lado alrededor del Sol."),
+    ("¿Qué planeta tiene los anillos más grandes y famosos?", "saturno", "¡Muy bien! Son de hielo y roca y brillan con el Sol."),
+    ("¿Qué planeta es tan ligero que flotaría en el agua?", "saturno", "¡Así es! Saturno es casi todo gas, menos denso que el agua."),
     ("¿Qué planeta gira al revés que casi todos los demás?", "venus", "¡Increíble! En Venus el Sol sale por el oeste."),
 ]
 
@@ -150,6 +200,10 @@ DATOS_COMP = {
     "tierra": dict(dia_h=23.93, incl=23.44),
     "luna": dict(dia_h=655.7, incl=6.68),
     "marte": dict(dia_h=24.62, incl=25.19),
+    "jupiter": dict(dia_h=9.925, incl=3.13),
+    "saturno": dict(dia_h=10.656, incl=26.73),
+    "urano": dict(dia_h=-17.24, incl=97.77),
+    "neptuno": dict(dia_h=16.11, incl=28.32),
 }
 
 
@@ -314,12 +368,13 @@ class ComparadorTamanos:
         if nombre == "sol":
             dib.dibujar(escena.buf, x, y, r, giro, C.COMPARADOR_INCLINACION, luz, np.array([1.0, 0.0, 0.0]), rodar)
         else:
-            dib.dibujar(escena.buf, x, y, r, giro, C.COMPARADOR_INCLINACION, luz, None, rodar, luz_vista=True)
+            dib.dibujar(escena.buf, x, y, r, giro, C.COMPARADOR_INCLINACION_ASTRO.get(nombre, C.COMPARADOR_INCLINACION), luz,
+                        None, rodar, luz_vista=True)
 
     def dibujar(self, escena, jd, t):
         if getattr(self, "_liberar", False):                    # se cerró: soltar la memoria de las texturas sin luz
             self._liberar = False
-            for n in ("tierra", "luna", "sol", "mercurio", "venus", "marte"):
+            for n in DATOS_COMP:
                 d = getattr(escena, n, None)
                 if d is not None and hasattr(d, "soltar_planas"):
                     d.soltar_planas()
@@ -354,30 +409,28 @@ class ComparadorTamanos:
         r_tope = max((h - C.COMPARADOR_Y_RESERVA) / 2.0, 40.0)
         self._luz_astro = {}
 
-        if es_sol:
-            # el Sol es colosal: a la izquierda; el planeta (a escala real, ampliado si no se vería) a la derecha
-            grande = "sol"
-            chico = b if a == "sol" else a
-            rg = min(w * 0.22, h * 0.30, r_tope)
-            cy = y_top + rg
-            rc_real = rg * DATOS_EDU[chico]["radio_km"] / A.RADIO_SOL_KM
-            ampliacion = max(C.COMPARADOR_MIN_PX_SOL / max(rc_real, 1e-6), 1.0)
-            rc = rc_real * ampliacion
-            xg, xc = w * 0.27, w * 0.72
-            self._luz_astro[chico] = (-0.90, -0.05, 0.45)        # el Sol queda a su izquierda
-            xs = {grande: xg, chico: xc}
-            rs = {grande: rg * crece, chico: rc * crece}
-            r_max = rg
+        # radios a escala real; el astro que se verría como un punto se amplía (y se avisa)
+        r_max = min(w * 0.22, h * 0.30, r_tope) if es_sol else min(w * 0.20, h * 0.26, r_tope)
+        # Saturno con sus anillos inclinados ocupa mas alto que su disco: se achica todo (a la misma escala)
+        k_alto = {n: (C.ANILLOS_ALTO_COMPARADOR if n == "saturno" else 1.0) for n in (a, b)}
+        r_max = min(r_max, r_tope / max(k_alto[a] * ra, k_alto[b] * rb) * mayor)
+        r_real = {a: r_max * ra / mayor, b: r_max * rb / mayor}
+        alto_v = {n: r_real[n] * k_alto[n] for n in (a, b)}       # media altura con anillos (planeta: su radio)
+        cy = y_top + max(alto_v.values())
+        chico = a if ra < rb else b
+        ampliacion = max(C.COMPARADOR_MIN_PX_SOL / max(r_real[chico], 1e-6), 1.0)
+        r_dib = dict(r_real)
+        r_dib[chico] = r_real[chico] * ampliacion
+        if es_sol:                                                # el Sol es colosal: a la izquierda
+            xs = {"sol": w * 0.27, chico: w * 0.72}
+            # el Sol queda a su izquierda (Saturno, algo desde arriba: si no, el Sol queda en el plano de los anillos)
+            self._luz_astro[chico] = (-0.80, -0.55, 0.40) if chico == "saturno" else (-0.90, -0.05, 0.45)
         else:
-            r_max = min(w * 0.20, h * 0.26, r_tope)
-            cy = y_top + r_max
-            ra_px, rb_px = r_max * ra / mayor, r_max * rb / mayor
             hueco = max(w * 0.07, 50.0)
-            dist = ra_px + rb_px + hueco                          # entre CENTROS: radios + hueco entre bordes
-            xa, xb = w * 0.5 - dist * 0.5, w * 0.5 + dist * 0.5
-            xs = {a: xa, b: xb}
-            rs = {a: ra_px * crece, b: rb_px * crece}
-            ampliacion = 1.0
+            ext = {n: r_dib[n] * (FACTOR_EXTERIOR if n == "saturno" else 1.0) for n in (a, b)}   # con sus anillos
+            dist = ext[a] + ext[b] + hueco                        # entre CENTROS: extensiones + hueco entre bordes
+            xs = {a: w * 0.5 - dist * 0.5, b: w * 0.5 + dist * 0.5}
+        rs = {n: r_dib[n] * crece for n in (a, b)}
 
         # de más grande a más chico: el chico nunca queda tapado por el resplandor del grande
         for n in sorted((a, b), key=lambda n: -rs[n]):
@@ -385,32 +438,34 @@ class ComparadorTamanos:
 
         # --- rótulos: aparecen cuando los astros ya casi llegaron
         op = min(max((anim - 0.55) / 0.45, 0.0), 1.0)
-        y_nom = cy + r_max + 44.0
+        y_nom = cy + max(alto_v.values()) + 44.0
         for n in (a, b):
-            r_real = rs[n] / max(crece, 1e-6)
-            yl = cy + r_real + 14.0                               # línea de medida: diámetro
-            if op > 0.0 and r_real > 3.0:
-                x0, x1 = xs[n] - r_real, xs[n] + r_real
+            rd = r_dib[n]
+            yl = cy + max(rd, alto_v[n] if n != chico or ampliacion <= 1.0 else rd * k_alto[n]) + 14.0   # línea de medida: diámetro
+            if op > 0.0 and rd > 3.0:
+                x0, x1 = xs[n] - rd, xs[n] + rd
                 col = tuple(int(c * (0.35 + 0.65 * op)) for c in COL_TENUE)
                 cv2.line(buf, (int(x0), int(yl)), (int(x1), int(yl)), col, 1, cv2.LINE_AA)
                 for xx in (x0, x1):
                     cv2.line(buf, (int(xx), int(yl - 5)), (int(xx), int(yl + 5)), col, 1, cv2.LINE_AA)
             if op > 0.0:
-                T.dibujar(buf, f"{_miles(DATOS_EDU[n]['radio_km'] * 2)} km", xs[n], yl + 8, 13, COL_TENUE, False, "c",
-                          opacidad=op)
+                km = f"{_miles(DATOS_EDU[n]['radio_km'] * 2)} km"
+                if n == chico and ampliacion > 1.5:
+                    T.dibujar(buf, f"{km}  ·  ampliado ×{ampliacion:.0f}", xs[n], yl + 8, 13, COL_ACENTO, False, "c",
+                              opacidad=op)
+                else:
+                    T.dibujar(buf, km, xs[n], yl + 8, 13, COL_TENUE, False, "c", opacidad=op)
                 T.dibujar(buf, S.NOMBRES[n], xs[n], y_nom, 21, COL_TEXTO, True, "c", opacidad=op)
                 g = DATOS_EDU[n]["gravedad"]
                 T.dibujar(buf, f"Gravedad: {g:.1f} m/s²", xs[n], y_nom + 30, 14, COL_TENUE, False, "c", opacidad=op)
                 T.dibujar(buf, f"Un día: {_duracion_dia(DATOS_COMP[n]['dia_h'])}", xs[n], y_nom + 50, 14, COL_TENUE,
                           False, "c", opacidad=op)
-        if es_sol and op > 0.0:
-            if ampliacion > 1.5:
-                rv = max(rc_real, 0.6)
-                xr = xc + rc + 70.0
-                cv2.circle(buf, (int(xr), int(cy)), max(int(round(rv)), 1), COL_TEXTO, -1, cv2.LINE_AA)
-                T.dibujar(buf, f"tamaño real", xr, cy + 16, 13, COL_TENUE, False, "c", opacidad=op)
-                T.dibujar(buf, f"Aquí se ve ×{ampliacion:.0f} más grande que en realidad", xc, cy - rc - 30,
-                          13, COL_ACENTO, False, "c", opacidad=op)
+        if op > 0.0 and ampliacion > 1.5:                         # su tamaño real, de referencia (hacia afuera)
+            otro = b if chico == a else a
+            lado = 1.0 if xs[chico] >= xs[otro] else -1.0
+            xr = xs[chico] + lado * (r_dib[chico] + 70.0)
+            cv2.circle(buf, (int(xr), int(cy)), max(int(round(r_real[chico])), 1), COL_TEXTO, -1, cv2.LINE_AA)
+            T.dibujar(buf, "tamaño real", xr, cy + 16, 13, COL_TENUE, False, "c", opacidad=op)
 
         # --- encabezado, con la razón contando hacia arriba
         valor = 1.0 + (ratio - 1.0) * _ease_cubica((t - self._t_inicio) / 1.4)

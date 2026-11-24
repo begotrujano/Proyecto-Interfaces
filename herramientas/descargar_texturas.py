@@ -17,6 +17,12 @@ que dar credito, ya esta en docs/LEEME.txt). La superficie de radar de Magellan 
 https://science.nasa.gov/3d-resources/venus (guardala como assets/venus_nasa_magellan.jpg y ponla
 primero en config.TEXTURA_VENUS si quieres ver el suelo en vez de las nubes).
 
+Jupiter: "Jupiter" de Solar System Scope (misma fuente y licencia CC BY 4.0 que Venus). Se guarda como
+assets/jupiter_nubes.jpg; mientras no este, se usa assets/jupiter_procedural.jpg (python -m universo.planetas jupiter).
+
+Saturno: "Saturn" de Solar System Scope (CC BY 4.0), assets/saturno_nubes.jpg; los anillos no usan imagen: se
+calculan (universo/anillos.py). Sin la imagen se usa assets/saturno_procedural.jpg (python -m universo.planetas saturno).
+
 Sol: no hay un mapa de toda la superficie con licencia clara en un solo archivo; si consigues uno
 equirectangular (2:1) de SDO/NASA, guardalo como assets/sol_nasa_sdo.jpg. Mientras tanto se usa la procedural.
 """
@@ -31,6 +37,10 @@ DESCARGAS = {
     "marte_nasa_viking.jpg": ("https://assets.science.nasa.gov/content/dam/science/cds/3d/resources/image/mars/Mars.jpg", 0.0),
     "mercurio_nasa_messenger.jpg": ("https://photojournal.jpl.nasa.gov/jpeg/PIA15063.jpg", 180.0),
     "venus_nubes.jpg": ("https://www.solarsystemscope.com/textures/download/2k_venus_atmosphere.jpg", 0.0),
+    "jupiter_nubes.jpg": ("https://www.solarsystemscope.com/textures/download/2k_jupiter.jpg", 0.0),
+    "neptuno_nubes.jpg": ("https://www.solarsystemscope.com/textures/download/2k_neptune.jpg", 0.0),
+    "urano_nubes.jpg": ("https://www.solarsystemscope.com/textures/download/2k_uranus.jpg", 0.0),
+    "saturno_nubes.jpg": ("https://www.solarsystemscope.com/textures/download/2k_saturn.jpg", 0.0),
 }
 
 

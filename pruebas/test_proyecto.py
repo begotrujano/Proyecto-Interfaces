@@ -699,6 +699,234 @@ def test_mercurio_y_venus():
         cv2.imwrite(str(SALIDA / f"render_{n}.png"), img)
 
 
+def test_jupiter():
+    """Jupiter: efemerides (oposicion y conjuncion reales), distancia, rotacion de 9 h 55 min y que se dibuje
+    como esfera con cinturones, iluminada por el lado del Sol; el viaje hasta el funciona."""
+    import cv2
+    from universo import astros as A
+    from universo import sistema as S
+    from universo.fichas import FICHAS
+    from universo.render import Escena
+    from universo.viaje import Viaje
+
+    def elongacion(jd):
+        p, s = S.geocentrica("jupiter", jd), A.sol_posicion(jd)
+        return math.degrees(math.acos(np.clip(p @ s / np.linalg.norm(p) / np.linalg.norm(s), -1, 1)))
+
+    assert "jupiter" in C.PLANETAS_ACTIVOS and "jupiter" in FICHAS
+    # oposiciones (7-dic-2024, 10-ene-2026) y conjunciones con el Sol (24-jun-2025, 29-jul-2026)
+    for fecha, esperado, tol in ((_fecha(2024, 12, 7, 0, 0), 180.0, 2.0), (_fecha(2026, 1, 10, 0, 0), 180.0, 2.0),
+                                 (_fecha(2025, 6, 24, 0, 0), 0.0, 2.0), (_fecha(2026, 7, 29, 0, 0), 0.0, 2.0)):
+        e = elongacion(A.dia_juliano(fecha))
+        print(f"  Jupiter el {fecha.date()}: a {e:.2f} grados del Sol (real ~{esperado:.0f})")
+        assert abs(e - esperado) < tol
+    jd = A.dia_juliano(_fecha(2026, 11, 22, 0, 33))
+    dist = [np.linalg.norm(S.heliocentrica("jupiter", jd + d)) for d in range(0, 4400, 20)]
+    assert 4.9 < min(dist) < 5.0 and 5.4 < max(dist) < 5.5          # perihelio 4.95 UA, afelio 5.46 UA
+    assert abs(S.radio_rt("jupiter") - 69911.0 / A.RADIO_TIERRA_KM) < 1e-9
+    # rotacion: tras un dia de Jupiter (9.9249 h) vuelve a apuntar igual; gira en el mismo sentido que la Tierra
+    inercial = lambda d: S.rotacion("jupiter", d) @ A.ecuatorial_a_tierra(d)
+    R1, R2 = inercial(jd), inercial(jd + 9.9249 / 24.0)
+    giro = np.degrees(np.arccos(np.clip((np.trace(R1 @ R2.T) - 1) / 2, -1, 1)))
+    print(f"  Jupiter tras 9.9249 h: gira {giro:.3f} grados")
+    assert giro < 0.05
+    x0 = inercial(jd).T @ np.array([1.0, 0.0, 0.0])
+    x1 = inercial(jd + 0.01).T @ np.array([1.0, 0.0, 0.0])
+    assert np.cross(x0, x1) @ (inercial(jd).T @ np.array([0.0, 0.0, 1.0])) > 0
+    # en la escena: esfera con cinturones (la textura varia), el lado del Sol es el brillante
+    esc = Escena()
+    est = Control().instantanea(0.0)
+    fecha = _fecha(2026, 11, 22, 0, 33)
+    esc.esperar_iconos()
+    esc.preparar("jupiter", esperar=True)
+    c, _, _, rot = esc._cuerpos(jd)["jupiter"]
+    sol = rot @ (A.sol_posicion(jd) - c)
+    sol /= np.linalg.norm(sol)
+    lado = np.cross(sol, [0.0, 0.0, 1.0])
+    g, i = A.giro_inclinacion(sol * math.cos(math.radians(80)) + lado / np.linalg.norm(lado) * math.sin(math.radians(80)))
+    for k in range(2):
+        img = esc.componer(0.0, g, est, {}, None, False, False, 0.0, i, fecha, "jupiter")
+    x, y, r = esc.astros["objetivos"]["jupiter"]
+    assert abs(x - 640) < 1 and abs(y - 360) < 1 and abs(r - esc.radio_base) < 1.0
+    gris = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(float)
+    yy, xx = np.mgrid[0:img.shape[0], 0:img.shape[1]]
+    disco = (xx - x) ** 2 + (yy - y) ** 2 < (0.9 * r) ** 2
+    cam = esc.camara(0.0, g, i, "jupiter", jd)
+    d_sol = A.sol_posicion(jd) - c
+    hacia = np.array([cam.M[0] @ d_sol, cam.M[1] @ d_sol])
+    hacia /= np.linalg.norm(hacia)
+    dia = disco & (((xx - x) * hacia[0] + (yy - y) * hacia[1]) > 0.3 * r)
+    noche = disco & (((xx - x) * hacia[0] + (yy - y) * hacia[1]) < -0.3 * r)
+    print(f"  jupiter: lado de dia {gris[dia].mean():.0f}, lado de noche {gris[noche].mean():.0f}, "
+          f"variacion {gris[dia].std():.1f}, textura {esc.jupiter.origen}")
+    assert gris[dia].mean() > 60 and gris[dia].mean() > 4 * gris[noche].mean() + 10
+    assert gris[dia].std() > 8                                       # cinturones y zonas: no es un disco liso
+    cv2.imwrite(str(SALIDA / "render_jupiter.png"), img)
+    # viaje desde la Tierra: llega al radio pedido, y se ve en la vista del sistema
+    esc.componer(0.0, 0.0, est, {}, None, False, False, 0.0, 0.0, fecha, "tierra")
+    for t in (5.0, 6.0):                                            # el 2.º cuadro ya paso el fundido entre vistas
+        sis = esc.componer(0.0, 0.0, est, {}, None, False, False, t, 0.0, fecha, "tierra", modo="sistema")
+    assert esc.astros["modo"] == "sistema" and "jupiter" in esc.astros["objetivos"]
+    cv2.imwrite(str(SALIDA / "render_sistema_jupiter.png"), sis)
+
+
+def test_saturno():
+    """Saturno: efemerides (oposiciones y conjunciones reales), rotacion, y los anillos: perfil (division de Cassini,
+    hueco de Encke), orientacion del polo, oclusion por el planeta, sombras en ambos sentidos y vista de canto."""
+    import cv2
+    from universo import astros as A
+    from universo import sistema as S
+    from universo.anillos import (FACTOR_EXTERIOR, R_IN, R_OUT, Saturno, perfil_anillos, polo_en_vista)
+    from universo.fichas import FICHAS
+    from universo.render import Escena
+    from universo.tierra import Tierra
+
+    assert "saturno" in C.PLANETAS_ACTIVOS and "saturno" in FICHAS
+    # el planeta esta en oposicion (~180 menos su latitud eclíptica) o en conjuncion con el Sol (~0 mas su latitud)
+    def elongacion(jd):
+        p, s = S.geocentrica("saturno", jd), A.sol_posicion(jd)
+        return math.degrees(math.acos(np.clip(p @ s / np.linalg.norm(p) / np.linalg.norm(s), -1, 1)))
+    for fecha, esperado in ((_fecha(2024, 9, 8, 0, 0), 180.0), (_fecha(2025, 9, 21, 0, 0), 180.0),
+                            (_fecha(2025, 3, 12, 0, 0), 0.0), (_fecha(2026, 3, 25, 0, 0), 0.0)):
+        e = elongacion(A.dia_juliano(fecha))
+        print(f"  Saturno el {fecha.date()}: a {e:.2f} grados del Sol (real ~{esperado:.0f})")
+        assert abs(e - esperado) < 3.5
+    jd = A.dia_juliano(_fecha(2026, 11, 22, 0, 33))
+    dist = [np.linalg.norm(S.heliocentrica("saturno", jd + d)) for d in range(0, 11000, 30)]
+    assert 9.0 < min(dist) < 9.1 and 10.0 < max(dist) < 10.1          # perihelio 9.04 UA, afelio 10.05 UA
+    inercial = lambda d: S.rotacion("saturno", d) @ A.ecuatorial_a_tierra(d)
+    R1, R2 = inercial(jd), inercial(jd + 10.656 / 24.0)                # su dia: 10 h 39 min
+    giro = np.degrees(np.arccos(np.clip((np.trace(R1 @ R2.T) - 1) / 2, -1, 1)))
+    print(f"  Saturno tras 10.656 h: gira {giro:.3f} grados")
+    assert giro < 0.2
+    # perfil de los anillos
+    alfa, col = perfil_anillos()
+    km = lambda k: int(round((k - R_IN) / (R_OUT - R_IN) * (len(alfa) - 1)))
+    B, cassini, A_, encke, C_ = alfa[km(105000)], alfa[km(119900)], alfa[km(128000)], alfa[km(133589)], alfa[km(85000)]
+    print(f"  opacidad: B {B:.2f}  Cassini {cassini:.2f}  A {A_:.2f}  Encke {encke:.2f}  C {C_:.2f}")
+    assert B > 0.6 and A_ > 0.4 and cassini < 0.25 * B and encke < 0.3 * A_ and C_ < 0.5 * B
+    assert alfa[km(65000) if km(65000) >= 0 else 0] < 0.1 and alfa[-1] < 0.1
+    assert 2.3 < FACTOR_EXTERIOR < 2.5
+    # polo: sin inclinar el norte esta arriba; con inclinacion positiva se aleja de ti (se ve el sur)
+    assert np.allclose(polo_en_vista(0.0, 0.0), [0.0, -1.0, 0.0])
+    assert polo_en_vista(0.4, 0.0)[2] < 0 and polo_en_vista(-0.4, 0.0)[2] > 0
+    assert abs(np.linalg.norm(polo_en_vista(0.3, -0.7)) - 1.0) < 1e-12
+    # dibujo: anillos fuera del disco, planeta tapando los de atras, sombra de los anillos sobre el planeta
+    sat = Saturno(C.TEXTURA_SATURNO, R=300, atmosfera=True, oceanos=False, color_atm=C.COLOR_ATM_SATURNO)
+    tie = Tierra(C.TEXTURA_SATURNO, R=300, atmosfera=True, oceanos=False, color_atm=C.COLOR_ATM_SATURNO)
+    cx, cy, r = 400, 260, 120
+    sol = np.array([-0.55, -0.45, 0.70])                              # Sol arriba a la izquierda, delante
+    a, b = np.zeros((520, 800, 3), np.uint8), np.zeros((520, 800, 3), np.uint8)
+    for k in range(2):
+        a[:] = 0
+        b[:] = 0
+        sat.dibujar(a, cx, cy, r, 0.3, -0.5, sol, None, 0.0)
+        tie.dibujar(b, cx, cy, r, 0.3, -0.5, sol, None, 0.0)
+    gris = lambda im: cv2.cvtColor(im, cv2.COLOR_BGR2GRAY).astype(float)
+    ga, gb = gris(a), gris(b)
+    anillo = (np.abs(np.arange(800)[None, :] - cx) > 1.3 * r) & (np.abs(np.arange(800)[None, :] - cx) < 2.3 * r) \
+        & (np.abs(np.arange(520)[:, None] - cy) < 6)                  # a los lados del planeta, sobre el ecuador de los anillos
+    print(f"  anillos: brillo {ga[anillo].mean():.0f} (sin anillos {gb[anillo].mean():.0f})")
+    assert gb[anillo].max() < 20 and ga[anillo].mean() > 40         # sin anillos es espacio vacio; con ellos, brillan
+    yy, xx = np.mgrid[0:520, 0:800]
+    disco = (xx - cx) ** 2 + (yy - cy) ** 2 < (0.9 * r) ** 2
+    cambia = (np.abs(a.astype(int) - b.astype(int)).sum(2)[disco] > 10).mean()
+    print(f"  planeta: {cambia * 100:.0f} % de su disco cambia por los anillos de enfrente y su sombra")
+    assert cambia > 0.03
+    cv2.imwrite(str(SALIDA / "render_saturno_anillos.png"), a)
+    # de canto: los anillos son una linea fina (el polo casi perpendicular a la vista)
+    c = np.zeros((520, 800, 3), np.uint8)
+    for k in range(2):
+        c[:] = 0
+        sat.dibujar(c, cx, cy, r, 0.3, 0.0, sol, None, 0.0)           # polo arriba y sin inclinar: los anillos de canto (linea horizontal)
+    col_x = int(cx + 1.8 * r)
+    grosor = int((gris(c)[:, col_x] > 25).sum())
+    print(f"  de canto: grosor de los anillos a 1.8 radios = {grosor} px")
+    assert 1 <= grosor <= 8
+    # en la escena: viaje, centrado, y se ve en la vista del sistema
+    esc = Escena()
+    est = Control().instantanea(0.0)
+    fecha = _fecha(2026, 11, 22, 0, 33)
+    esc.esperar_iconos()
+    esc.preparar("saturno", esperar=True)
+    for k in range(2):
+        img = esc.componer(0.0, 0.5, est, {}, None, False, False, 0.0, -0.4, fecha, "saturno")
+    x, y, r_ = esc.astros["objetivos"]["saturno"]
+    assert abs(x - 640) < 1 and abs(y - 360) < 1 and abs(r_ - esc.radio_base) < 1.0
+    cv2.imwrite(str(SALIDA / "render_saturno.png"), img)
+
+
+def test_urano():
+    """Urano: efemerides (oposiciones y conjunciones), rotacion retrograda de 17 h 14 min, eje tumbado y render."""
+    import cv2
+    from universo import astros as A
+    from universo import sistema as S
+    from universo.fichas import FICHAS
+    from universo.render import Escena
+    assert "urano" in C.PLANETAS_ACTIVOS and "urano" in FICHAS
+    def elongacion(jd):
+        p, s = S.geocentrica("urano", jd), A.sol_posicion(jd)
+        return math.degrees(math.acos(np.clip(p @ s / np.linalg.norm(p) / np.linalg.norm(s), -1, 1)))
+    e = elongacion(A.dia_juliano(_fecha(2025, 11, 21, 0, 0)))          # oposicion de 2025
+    print(f"  Urano el 2025-11-21: a {e:.2f} grados del Sol (real ~180)")
+    assert abs(e - 180.0) < 3.5
+    j0 = A.dia_juliano(_fecha(2026, 5, 18, 0, 0))                       # conjuncion de 2026: el minimo cerca de mayo
+    emin = min(elongacion(j0 + d) for d in range(-15, 16))
+    print(f"  Urano en conjuncion 2026: minimo a {emin:.2f} grados del Sol")
+    assert emin < 2.0
+    jd = A.dia_juliano(_fecha(2026, 11, 22, 0, 33))
+    dist = [np.linalg.norm(S.heliocentrica("urano", jd + d)) for d in range(0, 31000, 60)]
+    assert 18.2 < min(dist) < 18.4 and 20.0 < max(dist) < 20.2       # perihelio 18.3 UA, afelio 20.1 UA
+    # eje: el polo norte IAU esta a 97.8 grados del polo de la orbita (gira "acostado") y al reves
+    dec, w = S.FISICOS["urano"]["dec"][0], S.FISICOS["urano"]["w"][1]
+    assert dec < 0 and w < 0 and abs(360.0 / abs(w) * 24.0 - 17.24) < 0.01
+    esc = Escena()
+    est = Control().instantanea(0.0)
+    esc.esperar_iconos()
+    esc.preparar("urano", esperar=True)
+    fecha = _fecha(2026, 11, 22, 0, 33)
+    for k in range(2):
+        img = esc.componer(0.0, 0.5, est, {}, None, False, False, 0.0, -0.2, fecha, "urano")
+    x, y, r_ = esc.astros["objetivos"]["urano"]
+    assert abs(x - 640) < 1 and abs(y - 360) < 1 and abs(r_ - esc.radio_base) < 1.0
+    cv2.imwrite(str(SALIDA / "render_urano.png"), img)
+
+
+def test_neptuno():
+    """Neptuno: efemerides (oposicion y conjuncion), rotacion de 16 h 6 min, orbita casi circular y render."""
+    import cv2
+    from universo import astros as A
+    from universo import sistema as S
+    from universo.fichas import FICHAS
+    from universo.render import Escena
+    assert "neptuno" in C.PLANETAS_ACTIVOS and "neptuno" in FICHAS
+    def elongacion(jd):
+        p, s = S.geocentrica("neptuno", jd), A.sol_posicion(jd)
+        return math.degrees(math.acos(np.clip(p @ s / np.linalg.norm(p) / np.linalg.norm(s), -1, 1)))
+    e = elongacion(A.dia_juliano(_fecha(2025, 9, 23, 0, 0)))            # oposicion de 2025
+    print(f"  Neptuno el 2025-09-23: a {e:.2f} grados del Sol (real ~180)")
+    assert abs(e - 180.0) < 3.0
+    j0 = A.dia_juliano(_fecha(2026, 3, 22, 0, 0))                       # conjuncion de 2026: el minimo cerca de marzo
+    emin = min(elongacion(j0 + d) for d in range(-20, 21))
+    print(f"  Neptuno en conjuncion 2026: minimo a {emin:.2f} grados del Sol")
+    assert emin < 2.5
+    jd = A.dia_juliano(_fecha(2026, 11, 22, 0, 33))
+    dist = [np.linalg.norm(S.heliocentrica("neptuno", jd + d)) for d in range(0, 60000, 100)]
+    assert 29.7 < min(dist) < 30.0 and 30.1 < max(dist) < 30.4        # perihelio 29.8 UA, afelio 30.3 UA
+    w = S.FISICOS["neptuno"]["w"][1]
+    assert abs(360.0 / w * 24.0 - 16.11) < 0.02
+    esc = Escena()
+    est = Control().instantanea(0.0)
+    esc.esperar_iconos()
+    esc.preparar("neptuno", esperar=True)
+    fecha = _fecha(2026, 11, 22, 0, 33)
+    for k in range(2):
+        img = esc.componer(0.0, 0.5, est, {}, None, False, False, 0.0, -0.3, fecha, "neptuno")
+    x, y, r_ = esc.astros["objetivos"]["neptuno"]
+    assert abs(x - 640) < 1 and abs(y - 360) < 1 and abs(r_ - esc.radio_base) < 1.0
+    cv2.imwrite(str(SALIDA / "render_neptuno.png"), img)
+
+
 def test_primer_horneado_entre_hilos():
     """Si otro hilo (el precalentado) esta horneando la luz de un astro por primera vez, dibujarlo
     espera a que termine en vez de fallar con texturas = None (pasaba al abrir la vista del sistema)."""
@@ -811,7 +1039,7 @@ def test_tiempo_en_la_aplicacion():
     app.paso_render()
     x1 = app.escena.astros["objetivos"]["mercurio"][:2]
     print(f"  Mercurio se movio {math.hypot(x1[0] - x0[0], x1[1] - x0[1]):.0f} px en un mes simulado")
-    assert math.hypot(x1[0] - x0[0], x1[1] - x0[1]) > 20
+    assert math.hypot(x1[0] - x0[0], x1[1] - x0[1]) > 1.5            # (la vista encuadra hasta Neptuno: ~9 px/UA)
     f = app._fecha
     app._viajar("venus", time.perf_counter())
     assert app.reloj.congelado
@@ -882,17 +1110,18 @@ def test_vista_sistema_solar():
         img = esc.componer(0.0, 0.0, est, {}, None, False, False, 9.0, incl, fecha, "tierra", None, None, "sistema")
     ms = (time.perf_counter() - t0) / 5 * 1000
     a = esc.astros
-    assert a["modo"] == "sistema" and set(a["objetivos"]) == {"sol", "mercurio", "venus", "tierra", "marte"}
+    assert a["modo"] == "sistema" and set(a["objetivos"]) == {"sol", "mercurio", "venus", "tierra", "marte", "jupiter", "saturno", "urano", "neptuno"}
     px_ua = a["px_ua"]
     sx, sy, _ = a["objetivos"]["sol"]
-    for n in ("mercurio", "venus", "tierra", "marte"):
+    for n in ("mercurio", "venus", "tierra", "marte", "jupiter", "saturno", "urano", "neptuno"):
         x, y, _ = a["objetivos"][n]
         P = S.heliocentrica(n, jd)
         print(f"  {n}: {math.hypot(x - sx, y - sy) / px_ua:.3f} UA en pantalla (real {np.hypot(P[0], P[1]):.3f})")
         assert abs(math.hypot(x - sx, y - sy) / px_ua - np.hypot(P[0], P[1])) < 0.01
         assert abs(math.atan2(-(y - sy), x - sx) - math.atan2(P[1], P[0])) < 0.01    # y tambien el angulo: el norte eclíptico arriba
-    # el zoom por omision encuadra la orbita del planeta activo mas lejano (Marte, afelio 1.67 UA)
-    assert abs(px_ua * 1.666 - C.SISTEMA_RADIO_REL * esc.h) < 1.0
+    # el zoom por omision encuadra la orbita del planeta activo mas lejano (Neptuno, afelio 30.3 UA)
+    afelio = S.ELEMENTOS["neptuno"][0][0] * (1.0 + S.ELEMENTOS["neptuno"][1][0])
+    assert abs(px_ua * afelio - C.SISTEMA_RADIO_REL * esc.h) < 1.0
     # las orbitas dibujadas pasan por los planetas: hay pixeles de color de Marte bajo su icono
     print(f"  vista del sistema: {ms:.1f} ms por cuadro")
     assert ms < 40
@@ -1051,7 +1280,7 @@ def test_comparador():
     from universo import modos
     from universo.render import Escena
     from universo.modos import ComparadorTamanos, PARES_DEMO
-    assert len(PARES_DEMO) == 15 and len(set(map(frozenset, PARES_DEMO))) == 15     # todos los pares, sin repetir
+    assert len(PARES_DEMO) == 45 and len(set(map(frozenset, PARES_DEMO))) == 45     # todos los pares (10 astros), sin repetir
     esc = Escena(960, 540)
     esc.esperar_iconos()
     comp = ComparadorTamanos()

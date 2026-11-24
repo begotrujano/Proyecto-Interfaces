@@ -19,7 +19,9 @@ from universo.fichas import FICHAS
 from universo.reloj import fecha_inicial, texto_velocidad
 from universo.carga import AstroBajoDemanda
 from universo.cielo import Cielo
-from universo.planetas import textura_marte, textura_mercurio, textura_sol, textura_venus
+from universo.anillos import Saturno
+from universo.planetas import (textura_jupiter, textura_marte, textura_mercurio, textura_saturno, textura_sol,
+                               textura_neptuno, textura_urano, textura_venus)
 from universo.tierra import Tierra, niveles_esfera
 from universo.vista_sistema import VistaSistema
 
@@ -170,6 +172,14 @@ class Escena:
                         color_atm=C.COLOR_ATM_VENUS, desfase_lon=C.DESFASE_TEXTURA_VENUS)
         self.marte = bd("marte", C.TEXTURA_MARTE, textura_marte, 2048, atmosfera=False, oceanos=False,
                         desfase_lon=C.DESFASE_TEXTURA_MARTE)
+        self.jupiter = bd("jupiter", C.TEXTURA_JUPITER, textura_jupiter, 2048, oceanos=False,     # sin superficie: bruma
+                          color_atm=C.COLOR_ATM_JUPITER, desfase_lon=C.DESFASE_TEXTURA_JUPITER)
+        self.neptuno = bd("neptuno", C.TEXTURA_NEPTUNO, textura_neptuno, 2048, oceanos=False,
+                          color_atm=C.COLOR_ATM_NEPTUNO, desfase_lon=C.DESFASE_TEXTURA_NEPTUNO)
+        self.urano = bd("urano", C.TEXTURA_URANO, textura_urano, 2048, oceanos=False,
+                        color_atm=C.COLOR_ATM_URANO, desfase_lon=C.DESFASE_TEXTURA_URANO)
+        self.saturno = bd("saturno", C.TEXTURA_SATURNO, textura_saturno, 2048, oceanos=False, clase=Saturno,
+                          color_atm=C.COLOR_ATM_SATURNO, desfase_lon=C.DESFASE_TEXTURA_SATURNO)
         self.sol = Tierra(C.TEXTURA_SOL, emisivo=True, color_atm=C.COLOR_HALO_SOL,
                           desfase_lon=C.DESFASE_TEXTURA_SOL, respaldo=lambda: textura_sol(1024))
         self.texto = Texto()

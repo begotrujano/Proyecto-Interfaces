@@ -37,6 +37,50 @@ FICHAS = {
         ],
         dato="Es tan brillante que puedes verlo desde la Tierra al amanecer o al atardecer como una estrella gigante.",
     ),
+    "jupiter": dict(
+        tipo="El gigante del Sistema Solar",
+        filas=[
+            ("Tamaño", "Más de 1 300 Tierras cabrían dentro de él"),
+            ("Qué es", "Una bola de gas: no tiene suelo donde pisar"),
+            ("Su día", "Solo 10 horas: ¡es el que gira más rápido!"),
+            ("Su año", "12 años terrestres para rodear al Sol"),
+            ("Lunas", "Más de 90; las 4 grandes: Ío, Europa, Ganímedes y Calisto"),
+        ],
+        dato="Su Gran Mancha Roja es una tormenta más grande que la Tierra que lleva siglos girando.",
+    ),
+    "urano": dict(
+        tipo="El gigante de hielo que rueda de lado",
+        filas=[
+            ("Tamaño", "4 veces más ancho que la Tierra"),
+            ("Inclinación", "Su eje está tumbado casi 98°: gira rodando"),
+            ("Temperatura", "−224 °C: la atmósfera más fría del Sistema Solar"),
+            ("Su año", "84 años terrestres para rodear al Sol"),
+            ("Lunas", "28 conocidas, con nombres de obras de Shakespeare"),
+        ],
+        dato="Cada polo pasa unos 42 años seguidos de pleno día y otros 42 de noche total.",
+    ),
+    "neptuno": dict(
+        tipo="El gigante azul de los vientos",
+        filas=[
+            ("Tamaño", "4 veces más ancho que la Tierra"),
+            ("Vientos", "Los más rápidos: hasta 2 000 km/h"),
+            ("Distancia", "30 veces más lejos del Sol que la Tierra"),
+            ("Su año", "165 años terrestres para rodear al Sol"),
+            ("Lunas", "16 conocidas; Tritón gira al revés y tiene géiseres"),
+        ],
+        dato="Fue el primer planeta descubierto con matemáticas: se calculó su lugar antes de verlo (1846).",
+    ),
+    "saturno": dict(
+        tipo="El señor de los anillos",
+        filas=[
+            ("Tamaño", "9 veces más ancho que la Tierra"),
+            ("Anillos", "Hielo y roca: de granitos de polvo a rocas como casas"),
+            ("Ligereza", "Flotaría en agua si hubiera una bañera gigante"),
+            ("Su año", "29 años terrestres para rodear al Sol"),
+            ("Lunas", "Más de 270; la mayor, Titán, tiene atmósfera"),
+        ],
+        dato="Sus anillos miden cientos de miles de km de ancho pero casi nada de grosor: en algunos sitios, unos 10 metros.",
+    ),
     "tierra": dict(
         tipo="Nuestro hogar en el espacio",
         filas=[
