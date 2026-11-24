@@ -120,6 +120,10 @@ TEXTURA_NEPTUNO = ["assets/neptuno_nubes.jpg", "assets/neptuno_procedural.jpg"] 
 DESFASE_TEXTURA_NEPTUNO = 0.0
 COLOR_ATM_NEPTUNO = (0.95, 0.60, 0.30)   # BGR del halo de Neptuno: bruma azul
 ANILLOS_PX_MAX = 700000            # pixeles de la rejilla con que se calculan los anillos (mas grandes se reducen y se escalan)
+ANILLOS_PX_MOVIMIENTO = 120000     # lo mismo, MIENTRAS la vista cambia (viaje, giro, zoom): borroso pero fluido; al quedarse quieta se afina
+ANILLOS_SOMBRA_PX_MAX = 300000     # pixeles de la rejilla de la sombra de los anillos sobre el planeta (quieta)
+ANILLOS_SOMBRA_PX_MOVIMIENTO = 70000   # y mientras la vista cambia
+ANILLOS_REFINAR_S = 0.15           # s con la vista quieta antes de recalcular los anillos a calidad completa
 PLANETAS_ACTIVOS = ("mercurio", "venus", "tierra", "marte", "jupiter", "saturno", "urano", "neptuno")   # los que ya se dibujan como esfera. Agrega uno al implementarlo.
 # Carga bajo demanda (universo/carga.py): Mercurio, Venus, Marte... no se cargan completos al arrancar
 PLANETAS_EN_MEMORIA = 4            # texturas grandes (~80 MB c/u) que se quedan cargadas; las demas se liberan

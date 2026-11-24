@@ -1435,6 +1435,45 @@ def test_voz_en_la_aplicacion():
     print("  voz: viajes, comparador, quiz, vistas, gravedad, capas, tiempo, zoom, giro y control OK")
 
 
+def test_anillos_fluidos_en_movimiento():
+    """Saturno no se traba: mientras la vista cambia (viaje, giro, zoom) los anillos se calculan en baja resolucion
+    (rapido) y, ya quieta, se afinan a calidad completa sin cambiar como se ven."""
+    import cv2
+    from universo.anillos import Anillos, polo_en_vista
+    sol = np.array([-0.62, -0.38, 0.69])
+    an = Anillos()
+    fondo = np.full((720, 1280, 3), 25, np.uint8)
+    polo = polo_en_vista(-0.5, 0.2)
+    rapida = fondo.copy()
+    an.dibujar(rapida, 640, 360, 250, polo, sol)
+    assert an._anillo[7] is False                                  # primera vez: version rapida
+    time.sleep(C.ANILLOS_REFINAR_S + 0.05)
+    fina = fondo.copy()
+    an.dibujar(fina, 640, 360, 250, polo, sol)
+    assert an._anillo[7] is True                                   # quieta un rato: calidad completa
+    assert np.abs(rapida.astype(int) - fina.astype(int)).mean() < 3.0      # se parecen
+    assert fina[360, 640 + 400].tolist() != [25, 25, 25] or fina[360 - 5, 640 + 380].tolist() != [25, 25, 25]   # hay anillos
+    # el costo por cuadro con la vista cambiando (zoom): debe ser una fraccion del de calidad completa
+    t_rap = []
+    for k in range(10):
+        b = fondo.copy()
+        t0 = time.perf_counter()
+        an.dibujar(b, 640, 360, 200 + 3 * k, polo, sol)
+        t_rap.append(time.perf_counter() - t0)
+    an2 = Anillos()
+    t0 = time.perf_counter()
+    an2._construir(("x",), 0, 0, 1280, 720, 640, 360, 250, polo, sol / np.linalg.norm(sol), C.ANILLOS_PX_MAX, True)
+    t_full = time.perf_counter() - t0
+    mediana = sorted(t_rap)[len(t_rap) // 2]
+    assert mediana < 0.6 * t_full, (mediana, t_full)
+    # recorte a la elipse: de canto el area es mucho menor que el cuadrado
+    plano = polo_en_vista(-1.5, 0.0)
+    an.dibujar(fondo.copy(), 640, 360, 250, plano, sol)
+    x0, y0, x1, y1 = an._anillo[1:5]
+    assert (y1 - y0) < 0.6 * (x1 - x0), (x1 - x0, y1 - y0)
+    print(f"  anillos: {mediana * 1000:.1f} ms con la vista cambiando vs {t_full * 1000:.1f} ms a calidad completa")
+
+
 def test_comparador_elegir_astros():
     from universo.modos import ComparadorTamanos, MenuGestos
     comp = ComparadorTamanos()

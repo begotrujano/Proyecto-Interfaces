@@ -13,6 +13,7 @@ que se cachea y solo se rehace cuando cambian (o el tamano o la posicion). Solo 
 """
 
 import math
+import time
 
 import cv2
 import numpy as np
@@ -104,8 +105,8 @@ class Anillos:
         return X.astype(np.float32), Y.astype(np.float32)
 
     # ------------------------------------------------------------------
-    def _construir(self, clave, x0, y0, x1, y1, cx, cy, radio, polo, s):
-        X, Y = self._rejilla(x0, y0, x1, y1, cx, cy, radio, C.ANILLOS_PX_MAX)
+    def _construir(self, clave, x0, y0, x1, y1, cx, cy, radio, polo, s, max_px, definitivo):
+        X, Y = self._rejilla(x0, y0, x1, y1, cx, cy, radio, max_px)
         nx, ny, nz = polo
         nzc = nz if abs(nz) > 0.012 else math.copysign(0.012, nz if nz != 0 else 1.0)   # de canto: una linea fina
         a, b = -nx / nzc, -ny / nzc
@@ -137,22 +138,27 @@ class Anillos:
             a8 = cv2.resize(a8, (w, h), interpolation=cv2.INTER_LINEAR)
             c8 = cv2.resize(c8, (w, h), interpolation=cv2.INTER_LINEAR)
         inv = cv2.merge([255 - a8] * 3)
-        self._anillo = (clave, x0, y0, x1, y1, inv, np.ascontiguousarray(c8))
+        self._anillo = (clave, x0, y0, x1, y1, inv, np.ascontiguousarray(c8), definitivo, time.perf_counter())
 
     def dibujar(self, buf, cx, cy, radio, polo, sol):
         """Compone los anillos sobre buf (despues del planeta)."""
         alto, ancho = buf.shape[:2]
-        E = FACTOR_EXTERIOR * radio + 2.0
-        x0, y0, x1, y1 = max(int(cx - E), 0), max(int(cy - E), 0), min(int(cx + E) + 1, ancho), min(int(cy + E) + 1, alto)
+        # solo la elipse de los anillos (no el cuadrado): en pantalla se extienden R*sqrt(1 - n_x^2) a lo ancho y R*sqrt(1 - n_y^2) a lo alto
+        Ex = FACTOR_EXTERIOR * radio * math.sqrt(max(1.0 - float(polo[0]) ** 2, 0.0)) + 2.0
+        Ey = FACTOR_EXTERIOR * radio * math.sqrt(max(1.0 - float(polo[1]) ** 2, 0.0)) + 2.0
+        x0, y0, x1, y1 = max(int(cx - Ex), 0), max(int(cy - Ey), 0), min(int(cx + Ex) + 1, ancho), min(int(cy + Ey) + 1, alto)
         if x1 <= x0 or y1 <= y0:
             return
         s = np.asarray(sol, np.float64)
         s = s / (np.linalg.norm(s) + 1e-12)
         clave = (round(radio * 20.0), x0, y0, x1, y1, round(cx * 2.0), round(cy * 2.0),
                  tuple(np.round(polo / 0.003).astype(int)), tuple(np.round(s / 0.003).astype(int)))
-        if self._anillo is None or self._anillo[0] != clave:
-            self._construir(clave, x0, y0, x1, y1, cx, cy, radio, polo, s)
-        _, x0, y0, x1, y1, inv, c8 = self._anillo
+        a = self._anillo
+        if a is None or a[0] != clave:                            # la vista cambio: version rapida (borrosa)
+            self._construir(clave, x0, y0, x1, y1, cx, cy, radio, polo, s, C.ANILLOS_PX_MOVIMIENTO, False)
+        elif not a[7] and time.perf_counter() - a[8] > C.ANILLOS_REFINAR_S:      # quieta un rato: calidad completa
+            self._construir(clave, x0, y0, x1, y1, cx, cy, radio, polo, s, C.ANILLOS_PX_MAX, True)
+        _, x0, y0, x1, y1, inv, c8, _, _ = self._anillo
         roi = buf[y0:y1, x0:x1]
         roi[:] = cv2.add(cv2.multiply(roi, inv, scale=1.0 / 255.0), c8)
 
@@ -170,8 +176,12 @@ class Anillos:
             return
         clave = (round(radio * 20.0), x0, y0, x1, y1, round(cx * 2.0), round(cy * 2.0),
                  tuple(np.round(polo / 0.003).astype(int)), tuple(np.round(s / 0.003).astype(int)))
-        if self._sombra is None or self._sombra[0] != clave:
-            X, Y = self._rejilla(x0, y0, x1, y1, cx, cy, radio, 300000)
+        sb = self._sombra
+        refinar = sb is not None and sb[0] == clave and not sb[6] and time.perf_counter() - sb[7] > C.ANILLOS_REFINAR_S
+        if sb is None or sb[0] != clave or refinar:
+            definitivo = refinar
+            X, Y = self._rejilla(x0, y0, x1, y1, cx, cy, radio,
+                                 C.ANILLOS_SOMBRA_PX_MAX if definitivo else C.ANILLOS_SOMBRA_PX_MOVIMIENTO)
             xs, ys = X[None, :], Y[:, None]
             r2 = xs * xs + ys * ys
             disco = r2 < 1.0
@@ -187,8 +197,8 @@ class Anillos:
             w, h = x1 - x0, y1 - y0
             if f8.shape != (h, w):
                 f8 = cv2.resize(f8, (w, h), interpolation=cv2.INTER_LINEAR)
-            self._sombra = (clave, x0, y0, x1, y1, cv2.merge([f8] * 3))
-        _, x0, y0, x1, y1, f3 = self._sombra
+            self._sombra = (clave, x0, y0, x1, y1, cv2.merge([f8] * 3), definitivo, time.perf_counter())
+        _, x0, y0, x1, y1, f3, _, _ = self._sombra
         roi = buf[y0:y1, x0:x1]
         roi[:] = cv2.multiply(roi, f3, scale=1.0 / 255.0)
 
