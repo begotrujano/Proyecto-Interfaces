@@ -804,11 +804,41 @@ class ModoQuiz:
                 cv2.ellipse(buf, (px, py), (28, 28), -90, 0, int(360 * self.progreso), COL_OK, 4, cv2.LINE_AA)
 
 
+def _dibujar_icono_menu(buf, bid, cx, cy, col):
+    """Dibuja un icono limpio con antialiasing centrado arriba de cada tarjeta."""
+    cx, cy = int(round(cx)), int(round(cy))
+    if bid == "sistema":
+        cv2.circle(buf, (cx, cy), 4, col, -1, cv2.LINE_AA)
+        cv2.ellipse(buf, (cx, cy), (14, 6), -28, 0, 360, col, 1, cv2.LINE_AA)
+        cv2.circle(buf, (cx + 11, cy - 4), 2, col, -1, cv2.LINE_AA)
+    elif bid == "comparar":
+        cv2.line(buf, (cx - 11, cy - 3), (cx + 11, cy - 3), col, 1, cv2.LINE_AA)
+        cv2.line(buf, (cx, cy - 3), (cx, cy + 8), col, 1, cv2.LINE_AA)
+        cv2.line(buf, (cx - 6, cy + 8), (cx + 6, cy + 8), col, 1, cv2.LINE_AA)
+        cv2.circle(buf, (cx - 10, cy + 2), 4, col, 1, cv2.LINE_AA)
+        cv2.circle(buf, (cx + 10, cy + 1), 3, col, -1, cv2.LINE_AA)
+    elif bid == "gravedad":
+        cv2.circle(buf, (cx, cy + 4), 7, col, 1, cv2.LINE_AA)
+        cv2.line(buf, (cx, cy - 11), (cx, cy - 3), col, 1, cv2.LINE_AA)
+        cv2.line(buf, (cx - 3, cy - 6), (cx, cy - 3), col, 1, cv2.LINE_AA)
+        cv2.line(buf, (cx + 3, cy - 6), (cx, cy - 3), col, 1, cv2.LINE_AA)
+    elif bid == "corte":
+        cv2.circle(buf, (cx, cy), 11, col, 1, cv2.LINE_AA)
+        cv2.ellipse(buf, (cx, cy), (6, 6), 0, -90, 90, col, -1, cv2.LINE_AA)
+        cv2.line(buf, (cx, cy - 11), (cx, cy + 11), col, 1, cv2.LINE_AA)
+    elif bid == "quiz":
+        pts = np.array([
+            [cx, cy - 11], [cx + 3, cy - 3], [cx + 11, cy], [cx + 3, cy + 3],
+            [cx, cy + 11], [cx - 3, cy + 3], [cx - 11, cy], [cx - 3, cy - 3]
+        ], np.int32)
+        cv2.polylines(buf, [pts], True, col, 1, cv2.LINE_AA)
+
+
 # ----------------------------------------------------------------------
-# 5. Menú flotante activable con la palma (sin tocar el teclado)
+# 5. Menú flotante con tarjetas redondeadas (icono arriba + texto abajo)
 # ----------------------------------------------------------------------
 class MenuGestos:
-    """Botones flotantes en la esquina inferior derecha.
+    """Botones redondeados en fila horizontal abajo a la derecha.
     En pausa, deja la palma encima 0.85 s (o haz clic) para activar/desactivar cada modo."""
 
     def __init__(self, dwell_s=0.85):
@@ -818,6 +848,7 @@ class MenuGestos:
         self._inicio = 0.0
         self.progreso = 0.0
         self._cooldown_hasta = 0.0
+        self._cache_skins = {}
 
     def _construir(self, w, h, modo, comparador, gravedad, corte, quiz):
         items = [
@@ -829,39 +860,44 @@ class MenuGestos:
             items.insert(2, ("gravedad", "Gravedad", gravedad.activo))
             items.insert(3, ("corte", "Capas", corte.manual))
 
-        bw, bh, gap = 112, 38, 10
+        # Tarjetas principales (icono arriba, texto abajo) en fila horizontal
+        bw, bh, gap = 92, 74, 12
         total_w = len(items) * bw + (len(items) - 1) * gap
-        x_ini = w - total_w - 20
-        y0 = h - 126
+        x_ini = w - total_w - 22
+        y0 = h - 162
         botones = []
         for i, (bid, txt, act) in enumerate(items):
             x0 = x_ini + i * (bw + gap)
             botones.append((bid, txt, act, x0, y0, x0 + bw, y0 + bh))
 
+        # Botones contextuales encima de la fila principal
         extras = []
         if comparador.activo:
             a, b = comparador.par or ("", "")
-            extras = [("elegir_0", S.NOMBRES.get(a, "Astro 1"), comparador.eligiendo == 0),
-                      ("elegir_1", S.NOMBRES.get(b, "Astro 2"), comparador.eligiendo == 1),
-                      ("otro_par", "Otro par", False), ("comparar", "Cerrar", True)]
+            extras = [
+                ("elegir_0", S.NOMBRES.get(a, "Astro 1"), comparador.eligiendo == 0),
+                ("elegir_1", S.NOMBRES.get(b, "Astro 2"), comparador.eligiendo == 1),
+                ("otro_par", "Otro par", False),
+                ("comparar", "Cerrar", True),
+            ]
         elif gravedad.activo and modo == "astro":
             extras = [("peso_menos", "-5 kg", False), ("peso_mas", "+5 kg", False)]
 
+        ey0 = y0
         if extras:
-            ew = 104
-            ex_ini = w - (len(extras) * ew + (len(extras) - 1) * gap) - 20
-            ey0 = y0 - bh - 10
+            ew, eh = 100, 38
+            ex_ini = w - (len(extras) * ew + (len(extras) - 1) * gap) - 22
+            ey0 = y0 - eh - 10
             for i, (bid, txt, act) in enumerate(extras):
                 x0 = ex_ini + i * (ew + gap)
-                botones.append((bid, txt, act, x0, ey0, x0 + ew, ey0 + bh))
+                botones.append((bid, txt, act, x0, ey0, x0 + ew, ey0 + eh))
 
         if comparador.activo and comparador.eligiendo is not None and comparador.par:
-            # selector: los 10 astros en una fila sobre los botones (el actual de esa posicion queda marcado)
             actual = comparador.par[comparador.eligiendo]
             pw, ph, pgap = C.COMPARADOR_SELECTOR_ANCHO, C.COMPARADOR_SELECTOR_ALTO, C.COMPARADOR_SELECTOR_GAP
             n = len(_ASTROS_COMP)
-            px_ini = w - (n * pw + (n - 1) * pgap) - 20
-            py0 = y0 - 2 * bh - 20 - (ph - bh)
+            px_ini = w - (n * pw + (n - 1) * pgap) - 22
+            py0 = ey0 - ph - 10
             for i, nombre in enumerate(_ASTROS_COMP):
                 x0 = px_ini + i * (pw + pgap)
                 botones.append(("astro_" + nombre, S.NOMBRES[nombre], nombre == actual, x0, py0, x0 + pw, py0 + ph))
@@ -884,7 +920,6 @@ class MenuGestos:
 
         self._construir(w, h, modo, comparador, gravedad, corte, quiz)
 
-        # Solo responde a la mano cuando el control está en pausa (evita toques al girar/zoom)
         if est.activo or t < self._cooldown_hasta:
             self.hover_id = None
             self.progreso = 0.0
@@ -918,16 +953,69 @@ class MenuGestos:
             return tocado
         return None
 
+    def _skin_boton(self, T, w, h, estado_vis):
+        """Precalcula (1 - alfa) y color premultiplicado del botón redondeado."""
+        clave = (w, h, estado_vis)
+        if clave in self._cache_skins:
+            return self._cache_skins[clave]
+
+        radio = 16 if h >= 60 else 12
+        m_img = T.Image.new("L", (w, h), 0)
+        T.ImageDraw.Draw(m_img).rounded_rectangle((1, 1, w - 2, h - 2), radius=radio, fill=255)
+        masc = np.asarray(m_img, np.float32) / 255.0
+
+        b_img = T.Image.new("L", (w, h), 0)
+        T.ImageDraw.Draw(b_img).rounded_rectangle((1, 1, w - 2, h - 2), radius=radio, outline=255, width=2)
+        borde = np.asarray(b_img, np.float32) / 255.0
+
+        if estado_vis == "activo":
+            fondo = np.array([62, 46, 26], np.float32)
+            col_borde = np.array(COL_CIAN, np.float32)
+            op_fondo, op_borde = 0.90, 0.98
+        elif estado_vis == "hover":
+            fondo = np.array([54, 40, 24], np.float32)
+            col_borde = np.array(COL_OK, np.float32)
+            op_fondo, op_borde = 0.88, 0.95
+        else:
+            fondo = np.array([34, 22, 16], np.float32)
+            col_borde = np.array([195, 160, 95], np.float32)
+            op_fondo, op_borde = 0.85, 0.65
+
+        a_tot = np.clip(np.maximum(masc * op_fondo, borde * op_borde), 0.0, 1.0)[..., None]
+        pre = (masc[..., None] * op_fondo * fondo * (1.0 - borde[..., None] * op_borde)
+               + borde[..., None] * op_borde * col_borde)
+        inv = 1.0 - a_tot
+        self._cache_skins[clave] = (inv, pre)
+        return inv, pre
+
     def dibujar(self, escena):
         if not self.botones:
             return
         buf, T = escena.buf, escena.texto
+        H, W = buf.shape[:2]
+
         for bid, txt, activo, x0, y0, x1, y1 in self.botones:
-            borde = COL_OK if activo else (COL_CIAN if bid == self.hover_id else (105, 95, 85))
-            _panel(buf, x0, y0, x1, y1, borde)
+            xa, xb, ya, yb = max(int(x0), 0), min(int(x1), W), max(int(y0), 0), min(int(y1), H)
+            bw, bh = xb - xa, yb - ya
+            if bw <= 4 or bh <= 4:
+                continue
+
+            estado_vis = "activo" if activo else ("hover" if bid == self.hover_id else "normal")
+            inv, pre = self._skin_boton(T, bw, bh, estado_vis)
+            roi = buf[ya:yb, xa:xb]
+            roi[:] = cv2.convertScaleAbs(cv2.add(cv2.multiply(roi.astype(np.float32), inv), pre))
+
             if bid == self.hover_id and self.progreso > 0.0:
-                ancho_p = int((x1 - x0 - 4) * self.progreso)
-                cv2.rectangle(buf, (int(x0) + 2, int(y1) - 6),
-                              (int(x0) + 2 + ancho_p, int(y1) - 2), COL_OK, -1, cv2.LINE_AA)
-            col_txt = COL_OK if activo else COL_TEXTO
-            T.dibujar(buf, txt, (x0 + x1) / 2, y0 + 10, 14, col_txt, activo or bid == self.hover_id, "c")
+                margen = 12 if bh >= 60 else 8
+                ancho_p = int((bw - 2 * margen) * self.progreso)
+                if ancho_p > 0:
+                    cv2.line(buf, (xa + margen, yb - 6), (xa + margen + ancho_p, yb - 6),
+                             COL_OK, 3, cv2.LINE_AA)
+
+            col_txt = COL_CIAN if activo else COL_TEXTO
+            cx_mid = (xa + xb) / 2.0
+            if bh >= 60:
+                _dibujar_icono_menu(buf, bid, cx_mid, ya + 26, col_txt)
+                T.dibujar(buf, txt, cx_mid, yb - 24, 13, col_txt, activo or bid == self.hover_id, "c")
+            else:
+                T.dibujar(buf, txt, cx_mid, (ya + yb) / 2.0 - 8, 13, col_txt, True, "c")
