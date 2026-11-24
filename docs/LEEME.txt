@@ -35,6 +35,21 @@ TECLAS
   ,  mas lento, se detiene o va hacia atras     T  volver al ahora
   D  ficha del astro: dejarla fija u ocultarla
 
+COMANDOS POR VOZ (opcional, sin internet)
+  Instalar una vez:  .venv\Scripts\python.exe -m pip install vosk sounddevice
+                     .venv\Scripts\python.exe herramientas\descargar_voz.py   (modelo en espanol, 39 MB)
+  Arriba, junto al estado, dice "VOZ: escuchando". Otro microfono: --listar-microfonos y --microfono N.
+  Sin las librerias o el modelo el programa arranca igual, solo con gestos (o con --sin-voz).
+  Ejemplos (la voz hace lo mismo que los gestos, el menu y las teclas):
+    "ve a Marte" / "llevame a la Luna" / "Saturno"      viajar (con el quiz abierto, decir el planeta = contestar)
+    "compara la Tierra con Marte" / "compara Jupiter"   abre el comparador (la segunda, contra donde estas)
+    "cambia el segundo a Venus" / "otro par" / "cierra la comparacion"
+    "quiz" / "termina el quiz"      "sistema solar" / "vuelve al planeta"      "gravedad" / "mas peso" / "capas"
+    "mas rapido" / "hacia atras" / "pausa el tiempo" / "tiempo real"       "ficha" / "oculta la ficha"
+    "acercate" / "alejate" / "gira a la derecha" / "inclina hacia arriba" / "detente"
+    "activa el control" / "pausa el control" (gestos)    "oculta la camara"    "reinicia"    "ayuda"
+    "silencio" (deja de obedecer)  /  "activa la voz" o "aster escucha"  (vuelve a escuchar)
+
 SI ALGO NO SE SIENTE BIEN -> universo\config.py (tiene la guia al inicio)
   Con la tecla H ves en vivo los numeros de cada mano:
     puno  < 1.30 = puno cerrado      ok < 0.33 y dedos >= 2 = OK

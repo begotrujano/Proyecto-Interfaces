@@ -252,6 +252,19 @@ class ComparadorTamanos:
         self._arr_x = None                # x del puño derecho mientras arrastra
         self._empuje = 0.0                # giro (rad) pedido por el arrastre, aún sin aplicar
         self._vel_inercia = 0.0           # rad/s que queda al soltar
+        self.eligiendo = None             # 0 / 1 = se esta eligiendo el astro de esa posicion (menu); None = nada
+
+    def elegir_astro(self, posicion, nombre):
+        """Cambia el astro de la posicion 0 (izq.) o 1 (der.) del par; no permite repetir el mismo astro."""
+        if not self.par or nombre not in _ASTROS_COMP:
+            return False
+        par = list(self.par)
+        if par[1 - posicion] == nombre:                    # ya esta en la otra posicion: se intercambian
+            par[1 - posicion] = par[posicion]
+        par[posicion] = nombre
+        self.par = (par[0], par[1])
+        self.eligiendo = None
+        return True
 
     def alternar_demo(self, foco="tierra"):
         if not self.activo:
@@ -261,7 +274,15 @@ class ComparadorTamanos:
         else:
             self.cerrar()
 
+    def abrir(self, par, t):
+        """Abre el comparador con ese par (ordenes por voz); reinicia la animacion de entrada."""
+        self.par = (par[0], par[1])
+        self.eligiendo = None
+        self.activo = True
+        self._t_inicio = t
+
     def siguiente_par(self):
+        self.eligiendo = None
         self.par = PARES_DEMO[self._idx_demo % len(PARES_DEMO)]
         self._idx_demo += 1
         self.activo = True
@@ -269,6 +290,7 @@ class ComparadorTamanos:
     def cerrar(self):
         self.activo = False
         self.par = None
+        self.eligiendo = None
         self._par_visto = None
         self._t_prev = None
         self._arr_x = None
@@ -805,7 +827,10 @@ class MenuGestos:
 
         extras = []
         if comparador.activo:
-            extras = [("otro_par", "Otro par", False), ("comparar", "Cerrar", True)]
+            a, b = comparador.par or ("", "")
+            extras = [("elegir_0", S.NOMBRES.get(a, "Astro 1"), comparador.eligiendo == 0),
+                      ("elegir_1", S.NOMBRES.get(b, "Astro 2"), comparador.eligiendo == 1),
+                      ("otro_par", "Otro par", False), ("comparar", "Cerrar", True)]
         elif gravedad.activo and modo == "astro":
             extras = [("peso_menos", "-5 kg", False), ("peso_mas", "+5 kg", False)]
 
@@ -816,6 +841,17 @@ class MenuGestos:
             for i, (bid, txt, act) in enumerate(extras):
                 x0 = ex_ini + i * (ew + gap)
                 botones.append((bid, txt, act, x0, ey0, x0 + ew, ey0 + bh))
+
+        if comparador.activo and comparador.eligiendo is not None and comparador.par:
+            # selector: los 10 astros en una fila sobre los botones (el actual de esa posicion queda marcado)
+            actual = comparador.par[comparador.eligiendo]
+            pw, ph, pgap = C.COMPARADOR_SELECTOR_ANCHO, C.COMPARADOR_SELECTOR_ALTO, C.COMPARADOR_SELECTOR_GAP
+            n = len(_ASTROS_COMP)
+            px_ini = w - (n * pw + (n - 1) * pgap) - 20
+            py0 = y0 - 2 * bh - 20 - (ph - bh)
+            for i, nombre in enumerate(_ASTROS_COMP):
+                x0 = px_ini + i * (pw + pgap)
+                botones.append(("astro_" + nombre, S.NOMBRES[nombre], nombre == actual, x0, py0, x0 + pw, py0 + ph))
 
         self.botones = botones
 

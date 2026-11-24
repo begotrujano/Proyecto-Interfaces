@@ -583,6 +583,12 @@ class Escena:
         else:
             cv2.circle(b, _p(26, 31), 6 * 16, COL_GRIS, -1, cv2.LINE_AA, 4)
             T.dibujar(b, "EN PAUSA", 40, 19, 18, COL_GRIS, True)
+        voz = info.get("voz")                              # estado del microfono (si hay comandos de voz)
+        if voz is not None:
+            col = COL_DER if voz == "escuchando" else COL_GRIS
+            T.dibujar(b, "VOZ: " + voz, 250, 21, 14, col, voz == "escuchando")
+            if voz == "escuchando":                         # barrita de volumen: si no se mueve al hablar, no te oye
+                cv2.rectangle(b, (250, 36), (250 + int(70 * min(max(info.get("voz_nivel", 0.0), 0.0), 1.0)), 40), col, -1)
         if comparando:                                     # el comparador pone su propio encabezado y ayuda
             return
         lon = -math.degrees(giro)

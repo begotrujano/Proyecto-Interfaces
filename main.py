@@ -38,6 +38,7 @@ from universo.reloj import Reloj
 from universo.viaje import Selector, Viaje
 from universo import astros as A
 from universo import sistema as S
+from universo import voz as V
 from universo.modos import ComparadorTamanos, CorteTransversal, MenuGestos, ModoQuiz, SimuladorGravedad
 
 TITULO = "Universo en tus manos"
@@ -266,8 +267,11 @@ class Suave:
 
 # ----------------------------------------------------------------------
 class Aplicacion:
-    def __init__(self, captura, detector, ancho=C.ANCHO, alto=C.ALTO):
+    def __init__(self, captura, detector, ancho=C.ANCHO, alto=C.ALTO, voz=None):
         self.captura, self.detector = captura, detector
+        self.voz = voz                    # V.Escucha (o None: solo gestos)
+        self._voz_error_dicho = False
+        self.voz_activa = True            # False = en silencio (solo responde a "activa la voz")
         self.escena = Escena(ancho, alto)
         self._raton = {"x": -1.0, "y": -1.0, "abajo": False, "x0": 0.0, "y0": 0.0, "mov": 0.0, "t": 0.0}
         self._dim = (ancho, alto)
@@ -297,8 +301,12 @@ class Aplicacion:
     def iniciar(self):
         self.captura.start()
         self.deteccion.start()
+        if self.voz is not None:
+            self.voz.start()
 
     def detener(self):
+        if self.voz is not None:
+            self.voz.detener()
         self.deteccion.activo = False
         self.captura.detener()
         self.deteccion.join(timeout=2)
@@ -321,6 +329,16 @@ class Aplicacion:
                 "exposicion": getattr(self.captura, "exposicion", None),
                 "reloj": (self._fecha, 0.0 if self.reloj.congelado else self.reloj.velocidad),
                 "ficha": (self.foco, self.opacidad_ficha(t))}
+        if self.voz is not None:
+            for frase in self.voz.frases():
+                print(f"[voz] oí: «{frase}»  ->  {self.comando_voz(frase, t)}")
+            if self.voz.estado == "error" and not self._voz_error_dicho:
+                self._voz_error_dicho = True
+                print(f"[voz] ERROR: {self.voz.error}")
+                self.control.avisar("Voz: error al abrir el micrófono (mira la consola)")
+            info["voz_nivel"] = self.voz.nivel
+            info["voz"] = ("escuchando" if self.voz_activa else "silencio") if self.voz.estado == "escuchando" \
+                else ("iniciando" if self.voz.estado == "iniciando" else "sin microfono")
         seleccion = self._elegir_astro(est, t)
         if self.viaje is not None and self.viaje.terminado(t):
             self._llegar()
@@ -513,6 +531,13 @@ class Aplicacion:
             self.comparador.alternar_demo(self.foco)
             if self.comparador.activo:
                 self.comparador._t_inicio = t
+        elif accion in ("elegir_0", "elegir_1"):
+            pos = int(accion[-1])
+            self.comparador.eligiendo = None if self.comparador.eligiendo == pos else pos
+        elif accion.startswith("astro_") and self.comparador.activo:
+            if self.comparador.eligiendo is not None:
+                self.comparador.elegir_astro(self.comparador.eligiendo, accion[len("astro_"):])
+                self.comparador._t_inicio = t
         elif accion == "otro_par":
             self.comparador.siguiente_par()
             self.comparador._t_inicio = t
@@ -536,6 +561,130 @@ class Aplicacion:
                     self.alternar_sistema(t)
                 self.quiz.iniciar()
                 self.control.avisar("¡Modo Quiz activado!")
+
+    # ------------------------------------------------------------------
+    # Comandos por voz (universo/voz.py): hacen lo mismo que los gestos, el menu y las teclas
+    # ------------------------------------------------------------------
+    def comando_voz(self, texto, t=None):
+        """Interpreta una frase y la ejecuta. Devuelve el comando (accion, arg) o None si no lo entendio."""
+        t = time.perf_counter() if t is None else t
+        cmd = V.interpretar(texto)
+        if cmd is None:
+            if self.voz_activa:
+                self.control.avisar(f"No entendí: «{texto}»")
+            return None
+        accion, arg = cmd
+        if not self.voz_activa and not (accion == "voz" and arg):
+            return None                                   # en silencio: solo "activa la voz"
+        aviso = self._ejecutar_voz(accion, arg, t)
+        self.control.avisar(aviso if aviso else f"«{texto}»")
+        return cmd
+
+    def _preparar_comparador(self):
+        """Lo mismo que el menu al abrir el comparador: nada encima ni debajo."""
+        self.quiz.cerrar()
+        self.gravedad.activo = False
+        self.corte.manual = False
+
+    def _ejecutar_voz(self, accion, arg, t):
+        """Hace lo que pidio la voz. Devuelve un aviso para la pantalla o None."""
+        c = self.comparador
+        if self.viaje is not None and accion not in ("voz", "ayuda", "tiempo", "control", "camara", "girar", "zoom"):
+            return "Viajando… espera a llegar"
+        if accion == "voz":
+            self.voz_activa = bool(arg)
+            return "Voz activada" if arg else "Voz en silencio (di «activa la voz»)"
+        if accion == "ayuda":
+            return "Prueba: «ve a Marte» · «compara la Tierra con Marte» · «quiz» · «sistema solar» · «más rápido»"
+        if accion in ("astro", "viajar"):
+            if self.quiz.activo:
+                self.quiz.responder(arg, t)               # con el quiz abierto, decir el planeta es contestar
+                return f"Respuesta: {NOMBRES[arg]}"
+            if c.activo:
+                c.cerrar()
+            if arg == self.foco and self.modo == "sistema":
+                self.alternar_sistema(t)
+            elif arg == self.foco:
+                return f"Ya estás en {NOMBRES[arg]}"
+            else:
+                self._viajar(arg, t)
+        elif accion == "comparar":
+            self._preparar_comparador()
+            if arg is not None:
+                c.abrir(arg, t)
+            elif not c.activo:
+                c.alternar_demo(self.foco)
+                c._t_inicio = t
+        elif accion == "comparar_con":
+            if arg == self.foco:
+                return "¿Con qué astro lo comparo? Di «compara la Tierra con Marte»"
+            self._preparar_comparador()
+            c.abrir((self.foco, arg), t)
+        elif accion == "elegir":
+            if not c.activo:
+                return "Abre el comparador: «compara la Tierra con Marte»"
+            c.elegir_astro(arg[0], arg[1])
+            c._t_inicio = t
+        elif accion == "otro_par":
+            if not c.activo:
+                self._preparar_comparador()
+            c.siguiente_par()
+            c._t_inicio = t
+        elif accion == "cerrar_comparador":
+            c.cerrar()
+        elif accion == "quiz":
+            if bool(arg) != self.quiz.activo:
+                self._accion_menu("quiz", t)
+        elif accion == "gravedad":
+            if arg and self.modo == "sistema":
+                self.alternar_sistema(t)
+            if bool(arg) != self.gravedad.activo:
+                self._accion_menu("gravedad", t)
+        elif accion == "peso":
+            if not self.gravedad.activo:
+                return "Primero di «gravedad»"
+            self.gravedad.cambiar_peso(5.0 * arg)
+            return f"Peso en la Tierra: {self.gravedad.peso_tierra:.0f} kg"
+        elif accion == "capas":
+            if arg and self.modo == "sistema":
+                self.alternar_sistema(t)
+            if bool(arg) != self.corte.manual:
+                self._accion_menu("corte", t)
+        elif accion == "vista":
+            if (self.modo == "sistema") != (arg == "sistema"):
+                self._accion_menu("sistema", t)
+        elif accion == "tiempo":
+            if arg == "mas":
+                return self.reloj.paso(1, t).capitalize()
+            if arg == "menos":
+                return self.reloj.paso(-1, t).capitalize()
+            if arg == "ahora":
+                self.reloj.ahora(t)
+                return "Ahora mismo, en tiempo real"
+            self.reloj.fijar_velocidad(0.0, t)
+            return "Tiempo detenido"
+        elif accion == "zoom":
+            self.control.zoom_raton(arg * C.VOZ_ZOOM_PASOS)
+        elif accion == "girar":
+            self.control.impulsar(arg[0] * C.VOZ_GIRO_OMEGA, arg[1] * C.VOZ_INCL_OMEGA)
+        elif accion == "detener":
+            self.control.frenar()
+        elif accion == "ficha":
+            self.ver_ficha = bool(arg)
+            return "Ficha fija" if arg else "Ficha oculta"
+        elif accion == "control":
+            if bool(arg) != self.control.activo:
+                self.control.alternar_activo()
+        elif accion == "camara":
+            self.ver_camara = bool(arg)
+        elif accion == "reiniciar":
+            self.tecla(ord("r"))
+        elif accion == "cerrar":
+            c.cerrar()
+            self.quiz.cerrar()
+            self.gravedad.activo = False
+            self.corte.manual = False
+        return None
 
     def tecla(self, k):
         t = time.perf_counter()
@@ -622,7 +771,18 @@ def main():
     ap.add_argument("--camara", type=int, default=C.CAM_INDICE, help="indice de la camara (0, 1, ...)")
     ap.add_argument("--dshow", action="store_true", help="Windows: usar DirectShow (a veces abre mas rapido)")
     ap.add_argument("--pantalla-completa", action="store_true")
+    ap.add_argument("--sin-voz", action="store_true", help="no escuchar comandos de voz")
+    ap.add_argument("--microfono", type=int, default=None, help="indice del microfono (ver --listar-microfonos)")
+    ap.add_argument("--listar-microfonos", action="store_true")
     args = ap.parse_args()
+
+    if args.listar_microfonos:
+        try:
+            for i, nombre in V.listar_microfonos():
+                print(f"  {i}: {nombre}")
+        except ImportError:
+            print("Falta sounddevice (pip install vosk sounddevice).")
+        return 0
 
     ruta = buscar_modelo()
     if ruta is None:
@@ -637,7 +797,15 @@ def main():
           f"@ {cap.get(cv2.CAP_PROP_FPS):.0f} FPS (pedido)   Modelo: {ruta.name} ({detector.tipo})")
     print("Cargando la Tierra...")
     captura = Captura(cap.read, cap.release, ajustar=lambda v: fijar_exposicion(cap, v))
-    app = Aplicacion(captura, detector)
+    escucha = None
+    if C.VOZ_ACTIVA and not args.sin_voz:
+        ok, motivo = V.disponible()
+        if ok:
+            escucha = V.Escucha(args.microfono)
+            print("Voz: escuchando en cuanto cargue el modelo (di «ayuda» para ver los comandos).")
+        else:
+            print(f"Voz desactivada: {motivo}. Solo gestos.")
+    app = Aplicacion(captura, detector, voz=escucha)
     print(f"Textura: {app.escena.tierra.origen}")
     app.iniciar()
     try:

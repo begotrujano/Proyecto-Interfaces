@@ -2,3 +2,5 @@ opencv-python
 mediapipe
 numpy
 pillow
+vosk            # voz (opcional): reconocimiento sin internet
+sounddevice     # voz (opcional): microfono

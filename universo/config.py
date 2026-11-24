@@ -80,6 +80,9 @@ COMPARADOR_INCLINACION_ASTRO = {"saturno": -0.50}   # rad: Saturno se ve mas des
 COMPARADOR_Y_ARRIBA = 124          # px: donde empiezan los astros (justo bajo el encabezado)
 COMPARADOR_Y_RESERVA = 412         # px de alto que NO usan los astros (encabezado + rotulos + fila de botones del menu)
 COMPARADOR_MIN_PX_SOL = 12.0       # radio minimo en pantalla de un planeta frente al Sol (se avisa que esta ampliado)
+COMPARADOR_SELECTOR_ANCHO = 82       # px: ancho de cada boton de la fila para elegir astro en el comparador
+COMPARADOR_SELECTOR_ALTO = 34        # px: alto de esa fila
+COMPARADOR_SELECTOR_GAP = 6          # px: espacio entre botones de esa fila
 
 QUIZ_SOSTENER = 1.2                # s señalando un astro para confirmar respuesta en Modo Quiz
 QUIZ_FEEDBACK = 2.4                # s mostrando "¡Correcto!" o la pista antes de la siguiente pregunta
@@ -248,3 +251,15 @@ INCLINACION_MAX = 90.0         # grados; 90 = puedes ver el polo de frente
 FRICCION_V_VIDA_MEDIA = 0.5
 FRICCION_VIDA_MEDIA = 1.6      # s en que la velocidad de giro cae a la mitad
 ROTACION_REPOSO = 0.07         # rad/s de giro suave cuando el control esta en pausa
+
+# ----------------------------------------------------------------------
+# Comandos por voz (universo/voz.py)
+# ----------------------------------------------------------------------
+VOZ_ACTIVA = True                    # intentar escuchar al arrancar (si faltan vosk, sounddevice o el modelo, solo hay gestos)
+VOZ_MODELO = "modelos/vosk-es"       # carpeta del modelo Vosk en espanol (la baja herramientas/descargar_voz.py)
+VOZ_FRECUENCIA = 16000               # Hz del microfono (los modelos Vosk usan 16000)
+VOZ_ZOOM_PASOS = 4.0                 # "acercate" / "alejate": muescas de la rueda del raton (RATON_ZOOM_PASO c/u)
+VOZ_GIRO_OMEGA = 2.0                 # rad/s de impulso de "gira a la izquierda / derecha"
+VOZ_INCL_OMEGA = 1.4                 # rad/s de impulso de "inclina hacia arriba / abajo"
+VOZ_GRAMATICA = True                 # True: solo reconoce las frases esperadas (mas preciso); False: vocabulario libre
+                                     # (si no te entiende con tu acento o microfono, prueba False: interpretar() es flexible)

@@ -7,7 +7,7 @@ Proyecto de Interfaces Avanzadas (UV, 5.º semestre). Es un explorador educativo
 - `requirements.txt`: opencv-python (5.1), mediapipe (1.2.3), numpy (2.5), pillow (13).
 - Modelo `modelos/gesture_recognizer.task`. Se usan sus landmarks 2D/3D y la etiqueta de mano; las poses se calculan con geometría propia.
 - Ejecutar: `.venv\Scripts\python.exe main.py` (opciones: `--camara 1 --dshow --pantalla-completa`)
-- Pruebas sin cámara: `.venv\Scripts\python.exe pruebas\test_proyecto.py` (48 pruebas; deben pasar siempre. `test_integracion_hilos` exige >40 FPS y puede fallar si la laptop esta en ahorro de energia).
+- Pruebas sin cámara: `.venv\Scripts\python.exe pruebas\test_proyecto.py` (51 pruebas; deben pasar siempre. `test_integracion_hilos` exige >40 FPS y puede fallar si la laptop esta en ahorro de energia).
 
 ## Estructura de carpetas
 - `main.py` (entrada) · `requirements.txt` · `CLAUDE.md` (debe estar en la raíz: Claude Code solo lo lee ahí).
@@ -59,6 +59,7 @@ Proyecto de Interfaces Avanzadas (UV, 5.º semestre). Es un explorador educativo
 - **Etiquetas** (`universo/etiquetas.py`, solo python): `agrupar` junta los astros a menos de `ETIQUETA_UNIR_PX` ("Tierra · Luna") y `colocar` prueba 8 posiciones por etiqueta, sin chocar con otras etiquetas, con los astros ni con zonas ocupadas (la ficha). Lo usan las dos vistas vía `Escena.dibujar_etiquetas`.
 - **Fichas educativas** (`universo/fichas.py`, datos de la NASA Planetary Fact Sheet): al llegar a un astro (y al arrancar) se ve su ficha abajo a la izquierda `FICHA_DURACION` s y se desvanece; tecla D la fija u oculta (`Aplicacion.ver_ficha`, `opacidad_ficha`). Se prerrenderea una vez por astro (sobre negro y sobre blanco → transparencia) y por cuadro es una sola mezcla (~0.8 ms).
 - `universo/render.py`: el cielo y luego TODOS los astros (Sol incluido) de lejos a cerca, por profundidad; los astros muy lejanos son un punto; etiquetas con nombre y distancia desde el astro en foco; HUD con altitud de la cámara; cursores (naranja = zoom, azul = giro), barra de zoom, estado, avisos, info de depuración (tecla H) y miniatura de cámara. Textos con Pillow en caché, para que salgan los acentos.
+- **Voz** (`universo/voz.py`, opcional): `interpretar(frase) -> (accion, argumento)` (solo biblioteca estándar, probado sin micrófono) y el hilo `Escucha` (sounddevice + Vosk, modelo en `modelos/vosk-es`, lo baja `herramientas/descargar_voz.py`), restringido a la gramática de `frases_gramatica()` (lo demás sale como `[unk]` y se ignora). `Aplicacion.comando_voz(frase, t)` ejecuta la acción por las mismas rutas que el menú y las teclas (`_accion_menu`, `_viajar`, `Control.impulsar/frenar/zoom_raton`, `Reloj`): viajar, comparar (un par, o contra el astro actual), elegir astro del par, quiz (decir el planeta = contestar), vistas, gravedad, capas, ficha, tiempo, zoom, giro, control por gestos, cámara, reiniciar y silencio ("activa la voz" la reactiva). Si faltan vosk, sounddevice o el modelo, `voz.disponible()` explica por qué y el programa corre solo con gestos. HUD: "VOZ: escuchando". Parámetros `VOZ_*` en `config.py`; CLI `--sin-voz --microfono N --listar-microfonos`. **Agregar un comando** = una regla en `interpretar`, una frase en `FRASES_FIJAS` (o en la plantilla de `frases_gramatica`) y su rama en `Aplicacion._ejecutar_voz`; `test_voz_interpretar` exige que toda frase de la gramática se entienda.
 - `pruebas/simulacion.py`: manos 3D sintéticas en formato MediaPipe. `pruebas/test_proyecto.py`: pruebas unitarias e integración con hilos.
 
 ## Ratón / touchpad (alternativa a las manos, siempre activo)
@@ -68,7 +69,7 @@ Proyecto de Interfaces Avanzadas (UV, 5.º semestre). Es un explorador educativo
 Espacio activar/pausar · **S sistema solar (entrar/salir)** · **. / , tiempo más rápido / más lento o hacia atrás · T volver al ahora** · **D ficha (fijar/ocultar)** · R reiniciar · I intercambiar manos · [ ] exposición (E = automática) · V cámara · H info · F pantalla completa · Q/Esc salir.
 
 ## Estado y pendientes
-- Pruebas simuladas: 48/48 (conectada a la corriente; con batería `test_integracion_hilos` puede fallar por FPS). **Falta validar con la cámara real** y calibrar OK_ON, CAM_EXPOSICION, PUNO_ON, SWIPE_V_ON, GANANCIA_ZOOM y la inclinación (OMEGA_V_MAX, FRICCION_V_VIDA_MEDIA). También falta confirmar que la mano izquierda/derecha sale correcta (si no, tecla I o `INVERTIR_MANOS`).
+- Pruebas simuladas: 51 (49 pasaban al agregar la voz; fallaban `test_fichas_educativas`, que espera opacidad 0 a 1.5 s del fin de la ficha cuando el desvanecimiento dura 2.5 s, y `test_integracion_hilos` por FPS en la maquina de revision; conectada a la corriente; con batería `test_integracion_hilos` puede fallar por FPS). **Falta validar con la cámara real** y calibrar OK_ON, CAM_EXPOSICION, PUNO_ON, SWIPE_V_ON, GANANCIA_ZOOM y la inclinación (OMEGA_V_MAX, FRICCION_V_VIDA_MEDIA). También falta confirmar que la mano izquierda/derecha sale correcta (si no, tecla I o `INVERTIR_MANOS`).
 - Por decidir:
   - si el OK también pausa;
   - la pausa automática;

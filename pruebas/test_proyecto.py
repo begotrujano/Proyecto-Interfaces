@@ -1275,6 +1275,188 @@ def test_comparador_luz_quieta():
     print(f"  lado del Sol {clara}, lado oscuro {oscura}; maxima diferencia al girar {np.abs(fotos[1] - fotos[0]).max()}")
 
 
+def test_voz_interpretar():
+    """Frases -> comandos (sin microfono), con y sin acentos; y toda frase de la gramatica del reconocedor se entiende."""
+    from universo import voz as V
+    from universo import sistema as S
+    casos = {
+        "ve a Marte": ("viajar", "marte"), "llévame a la Luna": ("viajar", "luna"), "vamos al Sol": ("viajar", "sol"),
+        "visita Júpiter": ("viajar", "jupiter"), "acercate a saturno": ("viajar", "saturno"),
+        "Neptuno": ("astro", "neptuno"), "la respuesta es Venus": ("astro", "venus"),
+        "compara la Tierra con Marte": ("comparar", ("tierra", "marte")),
+        "compara el sol y la luna": ("comparar", ("sol", "luna")), "compara Urano": ("comparar_con", "urano"),
+        "compara": ("comparar", None), "otro par": ("otro_par", None), "cierra la comparación": ("cerrar_comparador", None),
+        "cambia el primero a Venus": ("elegir", (0, "venus")), "pon Marte en el segundo": ("elegir", (1, "marte")),
+        "inicia el quiz": ("quiz", True), "termina el quiz": ("quiz", False),
+        "sistema solar": ("vista", "sistema"), "sal del sistema solar": ("vista", "astro"), "vuelve al planeta": ("vista", "astro"),
+        "gravedad": ("gravedad", True), "quita la gravedad": ("gravedad", False), "más peso": ("peso", 1), "menos peso": ("peso", -1),
+        "muestra las capas": ("capas", True), "oculta las capas": ("capas", False),
+        "más rápido": ("tiempo", "mas"), "hacia atrás": ("tiempo", "menos"), "tiempo real": ("tiempo", "ahora"),
+        "pausa el tiempo": ("tiempo", "parar"), "acércate": ("zoom", 1), "más lejos": ("zoom", -1),
+        "gira a la izquierda": ("girar", (-1, 0)), "inclina hacia abajo": ("girar", (0, -1)), "deja de girar": ("detener", None),
+        "muestra la ficha": ("ficha", True), "oculta la ficha": ("ficha", False),
+        "activa los gestos": ("control", True), "pausa el control": ("control", False),
+        "oculta la cámara": ("camara", False), "reinicia": ("reiniciar", None), "ayuda": ("ayuda", None),
+        "silencio": ("voz", False), "áster escucha": ("voz", True), "cierra": ("cerrar", None),
+    }
+    for frase, esperado in casos.items():
+        assert V.interpretar(frase) == esperado, (frase, V.interpretar(frase), esperado)
+    assert V.interpretar("") is None and V.interpretar("blablabla") is None
+    frases = [f for f in V.frases_gramatica() if f != "[unk]"]
+    assert len(frases) > 300
+    for f in frases:
+        assert V.interpretar(f) is not None, f
+    for a in V.ASTROS:                                              # cada astro, de cada manera de pedirlo
+        n = S.NOMBRES[a].lower()
+        assert V.interpretar(f"ve {V._hacia(a)}") == ("viajar", a) and V.interpretar(n) == ("astro", a)
+        for b in V.ASTROS:
+            if a != b:
+                assert V.interpretar(f"compara {V._con_articulo(a)} con {V._con_articulo(b)}") == ("comparar", (a, b))
+    ok, motivo = V.disponible()
+    assert ok or motivo                                             # sin vosk / modelo explica por que
+    print(f"  {len(casos)} frases de ejemplo y {len(frases)} de la gramatica OK; voz disponible: {ok} {motivo}")
+
+
+def test_voz_en_la_aplicacion():
+    """Las ordenes por voz hacen lo mismo que gestos, menu y teclas: viajar, comparar, quiz, gravedad, tiempo, zoom, giro."""
+    from main import Aplicacion, Captura
+
+    class VozFalsa:
+        estado = "escuchando"
+        nivel = 0.0
+
+        def __init__(self):
+            self.cola = []
+
+        def frases(self):
+            f, self.cola = self.cola, []
+            return f
+
+    voz = VozFalsa()
+    app = Aplicacion(Captura(FuenteFalsa().leer), DetectorGuion(), voz=voz)
+    app.paso_render()
+
+    def llegar():                                                   # termina el viaje en curso
+        app.viaje.t0 -= C.VIAJE_DURACION + 1
+        app.paso_render()
+
+    for nombre in ("sol", "luna", "marte", "jupiter", "saturno", "urano", "neptuno", "venus", "mercurio", "tierra"):
+        art = {"sol": "al ", "luna": "a la ", "tierra": "a la "}.get(nombre, "a ")
+        if nombre == app.foco:
+            continue
+        assert app.comando_voz(f"ve {art}{nombre}") == ("viajar", nombre)
+        assert app.viaje is not None and app.viaje.nombre == nombre
+        llegar()
+        assert app.foco == nombre and app.viaje is None, nombre
+    assert app.comando_voz("ve a la tierra") is None or app.foco == "tierra"       # ya estas ahi: solo avisa
+
+    # comparador: abrir con un par, cambiar un astro, otro par, cerrar
+    app.comando_voz("compara la tierra con marte")
+    assert app.comparador.activo and app.comparador.par == ("tierra", "marte")
+    app.comando_voz("cambia el segundo a venus")
+    assert app.comparador.par == ("tierra", "venus")
+    app.comando_voz("pon venus en el primero")
+    assert app.comparador.par == ("venus", "tierra")                # se intercambian: nunca el mismo astro dos veces
+    antes = app.comparador.par
+    app.comando_voz("otro par")
+    assert app.comparador.par != antes and app.comparador.activo
+    app.comando_voz("cierra la comparación")
+    assert not app.comparador.activo
+    app.comando_voz("compara júpiter")                              # contra el astro donde estas (la Tierra)
+    assert app.comparador.par == ("tierra", "jupiter")
+    app.comparador.cerrar()
+
+    # quiz: decir el planeta es contestar
+    app.comando_voz("quiz")
+    assert app.quiz.activo
+    correcta = app.quiz.actual[1]
+    app.comando_voz(correcta)
+    assert app.quiz.puntaje == 1 and app.quiz.indice == 1
+    app.comando_voz("termina el quiz")
+    assert not app.quiz.activo
+
+    # vistas, gravedad, capas, ficha
+    app.comando_voz("sistema solar")
+    assert app.modo == "sistema"
+    app.comando_voz("vuelve al planeta")
+    assert app.modo == "astro"
+    app.comando_voz("gravedad")
+    assert app.gravedad.activo
+    peso = app.gravedad.peso_tierra
+    app.comando_voz("más peso")
+    assert app.gravedad.peso_tierra == peso + 5
+    app.comando_voz("quita la gravedad")
+    assert not app.gravedad.activo
+    app.comando_voz("capas")
+    assert app.corte.manual
+    app.comando_voz("quita las capas")
+    assert not app.corte.manual
+    app.comando_voz("oculta la ficha")
+    assert app.ver_ficha is False and app.opacidad_ficha(time.perf_counter()) == 0.0
+
+    # tiempo, zoom, giro, control
+    app.comando_voz("más rápido")
+    assert app.reloj.velocidad == C.TIEMPO_PASOS[C.TIEMPO_PASOS.index(1) + 1]
+    app.comando_voz("pausa el tiempo")
+    assert app.reloj.velocidad == 0
+    app.comando_voz("tiempo real")
+    assert app.reloj.velocidad == 1
+    z0 = app.control.log_escala
+    app.comando_voz("acércate")
+    assert app.control.log_escala > z0
+    app.comando_voz("aléjate")
+    assert abs(app.control.log_escala - z0) < 1e-9
+    app.control.frenar()
+    app.comando_voz("gira a la derecha")
+    assert app.control.omega > 0
+    app.comando_voz("gira a la izquierda")
+    app.comando_voz("gira a la izquierda")
+    assert app.control.omega < 0
+    app.comando_voz("detente")
+    assert app.control.omega == 0 and app.control.omega_v == 0
+    app.comando_voz("activa el control")
+    assert app.control.activo
+    app.comando_voz("pausa el control")
+    assert not app.control.activo
+
+    # silencio: ignora todo menos "activa la voz"; y las frases llegan por la cola del hilo de voz
+    app.comando_voz("silencio")
+    app.comando_voz("quiz")
+    assert not app.quiz.activo
+    voz.cola.append("activa la voz")
+    app.paso_render()
+    assert app.voz_activa
+    voz.cola.append("quiz")
+    app.paso_render()
+    assert app.quiz.activo
+    app.comando_voz("cierra")
+    assert not app.quiz.activo
+    assert app.comando_voz("blablabla") is None
+    print("  voz: viajes, comparador, quiz, vistas, gravedad, capas, tiempo, zoom, giro y control OK")
+
+
+def test_comparador_elegir_astros():
+    from universo.modos import ComparadorTamanos, MenuGestos
+    comp = ComparadorTamanos()
+    comp.par, comp.activo = ("tierra", "marte"), True
+    assert comp.elegir_astro(1, "saturno") and comp.par == ("tierra", "saturno")
+    assert comp.elegir_astro(0, "saturno") and comp.par == ("saturno", "tierra")      # repetido: se intercambian
+    assert not comp.elegir_astro(0, "pluton")
+    menu = MenuGestos()
+    sin = lambda *a: None
+    quiz = type("Q", (), {"activo": False})()
+    grav = type("G", (), {"activo": False})()
+    corte = type("C", (), {"manual": False})()
+    comp.eligiendo = 0
+    menu._construir(1280, 720, "sistema", comp, grav, corte, quiz)
+    ids = {b[0] for b in menu.botones}
+    assert {"elegir_0", "elegir_1", "astro_sol", "astro_neptuno"} <= ids and len(ids) >= 14
+    comp.eligiendo = None
+    menu._construir(1280, 720, "sistema", comp, grav, corte, quiz)
+    assert not any(b[0].startswith("astro_") for b in menu.botones)
+    print("  elegir astros del comparador OK")
+
+
 def test_comparador():
     from types import SimpleNamespace
     from universo import modos

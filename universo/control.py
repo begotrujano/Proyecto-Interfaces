@@ -138,6 +138,17 @@ class Control:
             if quieto or not C.RATON_INERCIA:
                 self.omega = self.omega_v = 0.0
 
+    def impulsar(self, omega=0.0, omega_v=0.0):
+        """Suma un impulso de giro (rad/s) y de inclinacion, como un swipe pero pedido por la voz."""
+        with self.lock:
+            self.omega = float(np.clip(self.omega + omega, -C.OMEGA_MAX, C.OMEGA_MAX))
+            self.omega_v = float(np.clip(self.omega_v + omega_v, -C.OMEGA_V_MAX, C.OMEGA_V_MAX))
+
+    def frenar(self):
+        """Detiene el giro y la inclinacion (la voz: "detente")."""
+        with self.lock:
+            self.omega = self.omega_v = 0.0
+
     def avisar(self, texto):
         """Aviso en pantalla desde otro hilo (p. ej. al cambiar la exposicion con el teclado)."""
         with self.lock:
