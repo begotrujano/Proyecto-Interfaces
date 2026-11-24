@@ -297,3 +297,21 @@ VOZ_GIRO_OMEGA = 2.0                 # rad/s de impulso de "gira a la izquierda 
 VOZ_INCL_OMEGA = 1.4                 # rad/s de impulso de "inclina hacia arriba / abajo"
 VOZ_GRAMATICA = True                 # True: solo reconoce las frases esperadas (mas preciso); False: vocabulario libre
                                      # (si no te entiende con tu acento o microfono, prueba False: interpretar() es flexible)
+
+# ----------------------------------------------------------------------
+# Explosion de un astro (universo/explosion.py): boton rojo escondido abajo a la derecha o la voz
+# ("explota la Tierra"). Con gestos solo se puede a traves del boton.
+# ----------------------------------------------------------------------
+EXPLOSION_BOTON_TAM = 26             # px: lado del boton escondido (esquina inferior derecha)
+EXPLOSION_BOTON_OPACIDAD = 0.22      # que tanto se ve el boton sin el cursor encima (escondido)
+EXPLOSION_RADIO_MIN = 20.0           # px: el astro debe verse al menos asi de grande para explotarlo
+EXPLOSION_CARGA = 0.7                # s: el astro se agrieta y brilla antes de estallar
+EXPLOSION_FRAGMENTOS = 42            # pedazos (celdas de Voronoi con borde irregular)
+EXPLOSION_CHISPAS = 900              # particulas incandescentes
+EXPLOSION_VELOCIDAD = (0.35, 1.25)   # radios del astro que recorren los pedazos (min, max) al frenar
+EXPLOSION_FRENADO = 1.1              # s: constante de frenado de los pedazos (exponencial)
+EXPLOSION_DERIVA = 0.04              # radios/s que siguen derivando los pedazos despues
+EXPLOSION_DESTELLO = 0.85            # intensidad del destello blanco de pantalla completa
+EXPLOSION_ONDA_VEL = 5.0             # radios/s de la onda expansiva
+EXPLOSION_RECONSTRUIR_S = 14.0       # s tras el estallido en que se vuelve a armar solo (None = nunca)
+EXPLOSION_RECONSTRUIR_DURACION = 2.6 # s que tarda en volver a armarse

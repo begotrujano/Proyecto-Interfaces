@@ -847,6 +847,7 @@ class MenuGestos:
         self.dwell_s = dwell_s
         self.botones = []             # [(id, texto, activo, x0, y0, x1, y1)]
         self.interruptores = []
+        self.secreto = None           # None = sin boton rojo; False/True = boton de explosion (True: ya explotando)
         self._tipo = {}               # id -> "modo" | "extra" | "astro" | "interruptor"
         self.tope = None              # y del borde de arriba de las filas de botones (la ayuda va encima)
         self.hover_id = None
@@ -927,6 +928,11 @@ class MenuGestos:
 
         self._construir(w, h, modo, comparador, gravedad, corte, quiz)
         self._con_interruptores(w)
+        if self.secreto is not None:                      # boton rojo escondido: esquina inferior derecha
+            lado = C.EXPLOSION_BOTON_TAM
+            x1, y1 = w - C.UI_MARGEN, h - C.UI_MARGEN
+            self.botones.append(("boom", "", bool(self.secreto), x1 - lado, y1 - lado, x1, y1))
+            self._tipo["boom"] = "secreto"
 
         if est.activo or t < self._cooldown_hasta:
             self.hover_id = None
@@ -969,7 +975,26 @@ class MenuGestos:
             tipo = self._tipo.get(bid, "modo")
             if tipo == "interruptor":
                 continue
+            if tipo == "secreto":
+                self._dibujar_secreto(escena.buf, x0, y0, x1, y1, activo, bid == self.hover_id)
+                continue
             estado = "activo" if activo else ("hover" if bid == self.hover_id else "normal")
             ui.boton(escena.buf, bid, txt, x0, y0, x1, y1, estado,
                      self.progreso if bid == self.hover_id else 0.0,
                      TECLAS_MENU.get(bid) if tipo == "modo" else None)
+
+    def _dibujar_secreto(self, buf, x0, y0, x1, y1, activo, encima):
+        """Boton rojo de la explosion: casi invisible hasta que el cursor o la palma estan encima."""
+        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        r = (x1 - x0) / 2.0
+        roi = buf[y0:y1 + 1, x0:x1 + 1]
+        capa = roi.copy()
+        rojo = (40, 40, 235) if (encima or activo) else (30, 30, 170)
+        p = (int(round((cx - x0) * 16)), int(round((cy - y0) * 16)))
+        cv2.circle(capa, p, int(r * 16), rojo, -1, cv2.LINE_AA, 4)
+        cv2.circle(capa, p, int(r * 0.55 * 16), (90, 90, 255), 1, cv2.LINE_AA, 4)
+        a = 1.0 if (encima or activo) else C.EXPLOSION_BOTON_OPACIDAD
+        cv2.addWeighted(capa, a, roi, 1.0 - a, 0.0, dst=roi)
+        if encima and self.progreso > 0.0:
+            cv2.ellipse(buf, (int(round(cx * 16)), int(round(cy * 16))), (int((r + 5) * 16),) * 2, -90, 0,
+                        360.0 * self.progreso, (255, 255, 255), 2, cv2.LINE_AA, 4)

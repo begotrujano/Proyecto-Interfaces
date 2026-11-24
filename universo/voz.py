@@ -16,6 +16,7 @@ Comandos (todos en `FRASES_FIJAS` y las plantillas de abajo; `interpretar` es ma
   sistema solar / vuelve al planeta     -> vista             gravedad / mas peso / capas / ficha
   mas rapido / hacia atras / ahora      -> tiempo            acercate / alejate / gira a la derecha / detente
   activa el control / pausa el control  -> gestos            silencio / activa la voz / ayuda
+  explota la Tierra / destruye el planeta -> explotar         reconstruye la Tierra / repara el planeta
 """
 
 import json
@@ -51,6 +52,10 @@ _ALEJAR = {"aleja", "alejate", "alejar", "lejos", "achica"}
 _CONTROL = {"control", "gestos", "gesto", "manos"}
 _CONTROL_ON = {"activa", "activar", "enciende", "reanuda", "empieza", "prende"}
 _CONTROL_OFF = {"pausa", "pausar", "desactiva", "apaga", "deten", "detener", "para"}
+_EXPLOTAR = {"explota", "explotar", "explote", "destruye", "destruir", "revienta", "reventar", "detona", "detonar",
+             "boom", "bum", "kaboom"}
+_RECONSTRUIR = {"reconstruye", "reconstruir", "restaura", "restaurar", "repara", "reparar", "arregla", "arreglar",
+                "rearma", "recupera"}
 
 
 def normalizar(texto):
@@ -75,7 +80,7 @@ def interpretar(texto):
     voz(bool) ayuda reiniciar ficha(bool) quiz(bool) otro_par cerrar_comparador comparar(par|None)
     comparar_con(astro) elegir((pos, astro)) gravedad(bool) peso(+1|-1) capas(bool)
     tiempo('mas'|'menos'|'ahora'|'parar') control(bool) camara(bool) vista('sistema'|'astro') viajar(astro)
-    zoom(+1|-1) girar((dx, dy)) detener astro(astro) cerrar"""
+    zoom(+1|-1) girar((dx, dy)) detener astro(astro) cerrar explotar(astro|None) reconstruir(astro|None)"""
     p = normalizar(texto)
     if not p:
         return None
@@ -94,6 +99,12 @@ def interpretar(texto):
         return ("ayuda", None)
     if t & {"reinicia", "reiniciar", "reinicio", "reset"} or ("empezar" in t and "nuevo" in t):
         return ("reiniciar", None)
+
+    # --- explosion (demostracion): solo por voz o con el boton rojo escondido
+    if t & _EXPLOTAR:
+        return ("explotar", astros[0] if astros else None)
+    if t & _RECONSTRUIR:
+        return ("reconstruir", astros[0] if astros else None)
 
     # --- ficha educativa
     if t & {"ficha", "datos"}:
@@ -196,6 +207,8 @@ FRASES_FIJAS = [
     "reinicia", "empezar de nuevo", "muestra la cámara", "oculta la cámara",
     "ayuda", "qué puedo decir", "comandos", "silencio", "deja de escuchar", "activa la voz", "áster escucha",
     "otro par", "siguiente par", "otra comparación", "cierra la comparación", "cierra", "cerrar", "compara",
+    "explota el planeta", "destruye el planeta", "haz explotar el planeta", "boom",
+    "reconstruye el planeta", "repara el planeta", "restaura el planeta",
 ]
 
 
@@ -218,6 +231,7 @@ def frases_gramatica():
         f += [n, na, f"es {na}", f"la respuesta es {na}", f"creo que es {na}", f"responde {na}"]
         f += [f"{v} {_hacia(a)}" for v in ("ve", "vamos", "llévame", "viaja", "vuelve", "regresa", "acércate")]
         f += [f"ir {_hacia(a)}", f"visita {na}", f"muéstrame {na}", f"compara {na}"]
+        f += [f"explota {na}", f"destruye {na}", f"haz explotar {na}", f"reconstruye {na}", f"repara {na}"]
         f += [f"cambia el primero a {na}", f"cambia el segundo a {na}", f"pon {na} en el primero",
               f"pon {na} en el segundo", f"cambia el segundo por {na}"]
         for b in ASTROS:

@@ -243,6 +243,7 @@ class Escena:
         self.astros = {}
         self.vista_sistema = VistaSistema(self)
         self._modo, self._fundido = "astro", None
+        self.explosion = None                              # explosion.Explosion (la pone componer desde info)
         self.resaltado = None                              # (x, y, radio, nombre) del astro bajo el cursor del raton
         self._ocupado = []                                 # zonas donde no van etiquetas (la ficha)
         self._fichas_cache = {}
@@ -296,6 +297,7 @@ class Escena:
         if inclinacion is None:
             inclinacion = estado.inclinacion
         self._foco_actual = foco                          # para no liberar su textura (carga bajo demanda)
+        self.explosion = info.get("explosion")
         # salida (viaje.Salida): vuelo hacia afuera; primero en la vista del astro, luego en la del sistema
         fase = salida.estado(t) if salida is not None else None
         if fase is not None:
@@ -415,6 +417,12 @@ class Escena:
         objetivos = {}
         for z, nombre, x, y, r in sorted(vistos, reverse=True):        # de lejos a cerca
             centro, R, dib, rot = cuerpos[nombre]
+            ex = self.explosion
+            if ex is not None and ex.oculta(nombre, t):                    # ya estallo: solo sus pedazos
+                ex.dibujar(b, nombre, float(x), float(y), float(r), t)
+                if -r < x < self.w + r and -r < y < self.h + r:
+                    objetivos[nombre] = (float(x), float(y), float(r))
+                continue
             if nombre == "sol":
                 self.cielo.dibujar_sol(b, float(x), float(y), 1.0)        # resplandor: va detras del disco
             if r < C.PUNTO_ASTRO_MIN or (nombre == "sol" and r < 6.0):     # muy lejos: un punto (el Sol: solo su resplandor)
@@ -427,7 +435,12 @@ class Escena:
                 hacia_sol = (sol_centro - centro) / (np.linalg.norm(sol_centro - centro) + 1e-12)
                 if nombre == "sol":                                        # no se ilumina: emite
                     hacia_sol = np.array([1.0, 0.0, 0.0])
-                dib.dibujar(b, x, y, r, g, i, M @ hacia_sol, rot @ hacia_sol, rod)
+                if ex is not None and ex.necesita_captura(nombre) and r >= C.EXPLOSION_RADIO_MIN:
+                    self._dibujar_y_capturar(dib, ex, nombre, x, y, r, (g, i, M @ hacia_sol, rot @ hacia_sol, rod), t)
+                else:
+                    dib.dibujar(b, x, y, r, g, i, M @ hacia_sol, rot @ hacia_sol, rod)
+                if ex is not None:
+                    ex.dibujar(b, nombre, float(x), float(y), float(r), t)  # la carga (grietas y brillo)
             if -r < x < self.w + r and -r < y < self.h + r:
                 objetivos[nombre] = (float(x), float(y), float(r))
         for z, nombre, x, y, r in vistos:                                # tapado por otro: no se elige
@@ -450,6 +463,24 @@ class Escena:
         }
         if C.ETIQUETAS_ASTROS and hiper < 0.05:
             self._etiquetas()
+
+    def _dibujar_y_capturar(self, dib, ex, nombre, x, y, r, args, t):
+        """Dibuja el astro y le pasa a la explosion su "foto": el parche y lo que cambio al dibujarlo."""
+        b = self.buf
+        ext = FACTOR_EXTERIOR if nombre == "saturno" else 1.12        # anillos / halo de la atmosfera
+        m = int(math.ceil(r * ext)) + 3
+        x0, y0 = max(int(x) - m, 0), max(int(y) - m, 0)
+        x1, y1 = min(int(x) + m + 1, self.w), min(int(y) + m + 1, self.h)
+        antes = b[y0:y1, x0:x1].copy()
+        dib.dibujar(b, x, y, r, *args)
+        despues = b[y0:y1, x0:x1]
+        if x1 <= x0 or y1 <= y0:
+            return
+        mascara = cv2.absdiff(antes, despues).max(axis=2) > 6       # anillos y halo
+        disco = np.zeros(mascara.shape, np.uint8)                   # y todo el disco (el lado de noche es negro)
+        cv2.circle(disco, (int(round((x - x0) * 16)), int(round((y - y0) * 16))), int(r * 16), 1, -1, cv2.LINE_8, 4)
+        mascara |= disco.astype(bool)
+        ex.capturar(despues.copy(), mascara, x - x0, y - y0, r, t)
 
     def _sistema(self, log_escala, giro, inclinacion, fecha, foco, transicion=None):
         self.astros = self.vista_sistema.dibujar(self.buf, A.dia_juliano(fecha), log_escala, giro, inclinacion, foco,

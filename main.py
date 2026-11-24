@@ -32,6 +32,7 @@ import numpy as np
 
 from universo import config as C
 from universo.control import Control
+from universo.explosion import Explosion
 from universo.manos import SeguidorManos
 from universo.render import Escena, fecha_actual
 from universo.reloj import Reloj
@@ -298,6 +299,8 @@ class Aplicacion:
         self.corte = CorteTransversal()
         self.quiz = ModoQuiz()
         self.menu = MenuGestos()
+        self.explosion = Explosion()      # boton rojo escondido o la voz ("explota la Tierra"); no hay gesto propio
+        self._explotar_al_llegar = None   # "explota Marte" estando en otro astro: viaja y explota al llegar
 
     def iniciar(self):
         self.captura.start()
@@ -365,6 +368,8 @@ class Aplicacion:
         if self.voz is not None:
             interruptores.append(("t_voz", "VOZ", self.voz_activa))
         self.menu.interruptores = interruptores
+        self.menu.secreto = (self.explosion.activa if (self.modo == "astro" and not self.comparador.activo
+                                                       and not self.quiz.activo) else None)
         accion_menu = self.menu.actualizar(
             est, self.modo, self.comparador, self.gravedad, self.corte, self.quiz,
             self.viaje or self.salida, self._dim[0], self._dim[1], t
@@ -374,6 +379,8 @@ class Aplicacion:
         if self.suave.log_escala is None:                 # cambio de vista dentro de este cuadro: toma el estado nuevo
             est = self.control.instantanea(t)
             self.suave.paso(est.log_escala, est.giro, est.inclinacion, dt)
+        self.explosion.actualizar(t)
+        info["explosion"] = self.explosion
         info["modos"] = (self.corte, self.gravedad, self.comparador, self.quiz)
         info["menu"] = self.menu
         return self.escena.componer(self.suave.log_escala, self.suave.giro, est, info,
@@ -559,6 +566,43 @@ class Aplicacion:
         giro, incl = A.giro_inclinacion(rot @ v.dir_final)
         self.control.colocar(giro, incl)
         self.suave.giro, self.suave.inclinacion = giro, incl
+        if self._explotar_al_llegar == v.nombre:
+            self._explotar_al_llegar = None
+            self.explotar(v.nombre, time.perf_counter())
+
+    # ------------------------------------------------------------------
+    # Explosion de un astro (demostracion): boton rojo escondido o la voz
+    # ------------------------------------------------------------------
+    def explotar(self, astro=None, t=None):
+        """Hace estallar el astro (por defecto, el del foco). Si ya estaba estallado, lo reconstruye.
+        Devuelve el aviso para la pantalla."""
+        t = time.perf_counter() if t is None else t
+        astro = astro or self.foco
+        nombre = NOMBRES.get(astro, astro)
+        if self.explosion.activa and self.explosion.astro == astro:
+            return self.reconstruir(t)
+        if self.ocupado:
+            return "Viajando… espera a llegar"
+        self.comparador.cerrar()                          # nada encima del astro
+        self.quiz.cerrar()
+        self.gravedad.activo = False
+        self.corte.manual = False
+        if astro != self.foco:                            # otro astro: ir a el y explotarlo al llegar
+            self._explotar_al_llegar = astro
+            self._viajar(astro, t)
+            return f"Rumbo a {nombre}… prepárate"
+        if self.modo == "sistema":
+            self.alternar_sistema(t)
+        self.explosion.iniciar(astro)
+        return f"¡{nombre} va a explotar! (se reconstruye sola en {C.EXPLOSION_RECONSTRUIR_S:.0f} s)"             if C.EXPLOSION_RECONSTRUIR_S is not None else f"¡{nombre} va a explotar!"
+
+    def reconstruir(self, t=None):
+        t = time.perf_counter() if t is None else t
+        if not self.explosion.activa:
+            return "No hay nada que reconstruir"
+        nombre = NOMBRES.get(self.explosion.astro, self.explosion.astro)
+        self.explosion.restaurar(t)
+        return f"Reconstruyendo {nombre}…"
 
     def opacidad_ficha(self, t):
         """1 mientras se lee la ficha del astro, luego se desvanece suavemente en 2.5 s (salvo que se fije con D)."""
@@ -567,7 +611,9 @@ class Aplicacion:
         return float(min(max(1.0 - (t - self._ficha_t0 - C.FICHA_DURACION) / 2.5, 0.0), 1.0))
 
     def _accion_menu(self, accion, t):
-        if accion == "t_camara":                          # interruptores del panel de vista (derecha)
+        if accion == "boom":                              # boton rojo escondido (palma o clic): explota / reconstruye
+            self.control.avisar(self.explotar(self.foco, t))
+        elif accion == "t_camara":                          # interruptores del panel de vista (derecha)
             self.ver_camara = not self.ver_camara
         elif accion == "t_ficha":
             self.ver_ficha = not (self.opacidad_ficha(t) > 0.5)
@@ -650,6 +696,10 @@ class Aplicacion:
         if accion == "voz":
             self.voz_activa = bool(arg)
             return "Voz activada" if arg else "Voz en silencio (di «activa la voz»)"
+        if accion == "explotar":
+            return self.explotar(arg, t)
+        if accion == "reconstruir":
+            return self.reconstruir(t)
         if accion == "ayuda":
             return "Prueba: «ve a Marte» · «compara la Tierra con Marte» · «quiz» · «sistema solar» · «más rápido»"
         if accion in ("astro", "viajar"):
@@ -754,6 +804,8 @@ class Aplicacion:
             with self.control.lock:
                 self.control.reiniciar()
             self.foco, self.viaje, self.modo, self.salida = "tierra", None, "astro", None
+            self.explosion.reiniciar()
+            self._explotar_al_llegar = None
             self.comparador.cerrar()
             self.quiz.cerrar()
             self.reloj.congelar(t, False)
