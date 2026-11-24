@@ -439,17 +439,21 @@ class Escena:
         return renglones + ([actual] if actual else [])
 
     def _ficha_diseno(self, nombre):
-        """-> (caja (x0, y0, x1, y1), renglones) de la ficha de un astro. Se calcula una vez."""
+        """-> (caja (x0, y0, x1, y1), renglones) de la ficha compacta en la esquina."""
         if nombre in self._fichas_cache:
             return self._fichas_cache[nombre]
         f = FICHAS[nombre]
-        W, pad = C.FICHA_ANCHO, 14
-        col = max(self.medir_texto(e, 13, False)[0] for e, _ in f["filas"]) + 14
-        filas = [(e, self._envolver(v, 13, W - 2 * pad - col)) for e, v in f["filas"]]
-        tipo = self._envolver(f["tipo"], 13, W - 2 * pad)
-        dato = self._envolver(f["dato"], 13, W - 2 * pad)
-        alto = pad + 30 + 18 * len(tipo) + 8 + sum(19 * len(v) + 3 for _, v in filas) + 8 + 18 * len(dato) + pad
-        x0, y1 = 20, self.h - 92
+        W, pad = min(C.FICHA_ANCHO, 315), 14
+        col = max(self.medir_texto(e, 12, True)[0] for e, _ in f["filas"]) + 12
+        filas = [(e, self._envolver(v, 12, W - 2 * pad - col - 4)) for e, v in f["filas"]]
+        tipo = self._envolver(f["tipo"], 12, W - 2 * pad - 4)
+        dato = self._envolver(f["dato"], 12, W - 2 * pad - 18)
+
+        alto_filas = sum(17 * len(v) + 4 for _, v in filas)
+        alto_dato = 16 * len(dato) + 26
+        alto = pad + 26 + 16 * len(tipo) + 12 + alto_filas + 8 + alto_dato + pad
+
+        x0, y1 = 84, self.h - 86                 # esquina inferior izquierda, sin tocar zoom ni planeta
         caja = (x0, max(y1 - alto, 80), x0 + W, y1)
         self._fichas_cache[nombre] = (caja, (col, tipo, filas, dato))
         return self._fichas_cache[nombre]
@@ -469,40 +473,85 @@ class Escena:
         return self._fichas_cache[clave]
 
     def _ficha_en(self, lienzo, nombre):
-        """Dibuja la ficha sobre un lienzo del tamano del panel."""
+        """Dibuja la ficha compacta con esquinas redondeadas, acento del astro y caja de dato curioso."""
         _, (col, tipo, filas, dato) = self._ficha_diseno(nombre)
+        H, W = lienzo.shape[:2]
         pad, T = 14, self.texto
-        cv2.addWeighted(lienzo, 0.38, np.full_like(lienzo, (22, 16, 12)), 0.62, 0, dst=lienzo)
-        cv2.rectangle(lienzo, (0, 0), (lienzo.shape[1] - 1, lienzo.shape[0] - 1), (90, 80, 70), 1, cv2.LINE_AA)
+        acento = tuple(int(c) for c in S.COLORES.get(nombre, COL_DER))   # color del astro (BGR)
+
+        # Máscara con esquinas redondeadas
+        m_img = T.Image.new("L", (W, H), 0)
+        T.ImageDraw.Draw(m_img).rounded_rectangle((0, 0, W - 1, H - 1), radius=12, fill=255)
+        masc = (np.asarray(m_img, np.float32) / 255.0)[..., None]
+
+        # Fondo azul espacial oscuro con 92% de opacidad
+        fondo_card = np.full((H, W, 3), (28, 16, 12), np.float32)
+        mezcla = lienzo.astype(np.float32) * (1.0 - 0.92 * masc) + fondo_card * (0.92 * masc)
+        lienzo[:] = np.clip(mezcla, 0, 255).astype(np.uint8)
+
+        # Barra de acento a la izquierda
+        barra = lienzo.copy()
+        cv2.rectangle(barra, (0, 0), (5, H), acento, -1)
+        lienzo[:] = np.where(masc > 0.5, barra, lienzo)
+
+        # Borde redondeado sutil
+        b_img = T.Image.new("L", (W, H), 0)
+        T.ImageDraw.Draw(b_img).rounded_rectangle((0, 0, W - 1, H - 1), radius=12, outline=255, width=2)
+        borde_m = (np.asarray(b_img, np.float32) / 255.0)[..., None] * 0.7
+        col_borde = np.array([min(c + 40, 255) for c in acento], np.float32)
+        lienzo[:] = np.clip(lienzo.astype(np.float32) * (1.0 - borde_m) + col_borde * borde_m, 0, 255).astype(np.uint8)
+
+        # Encabezado
+        x_txt = pad + 3
         y = pad
-        T.dibujar(lienzo, NOMBRES.get(nombre, nombre), pad, y, 22, COL_TEXTO, True)
-        y += 30
+        T.dibujar(lienzo, NOMBRES.get(nombre, nombre), x_txt, y, 20, COL_TEXTO, True)
+        y += 26
         for renglon in tipo:
-            T.dibujar(lienzo, renglon, pad, y, 13, COL_DER)
-            y += 18
+            T.dibujar(lienzo, renglon, x_txt, y, 12, acento, True)
+            y += 16
+
+        # Línea divisoria
+        y += 5
+        cv2.line(lienzo, (x_txt, y), (W - pad, y), (70, 60, 52), 1, cv2.LINE_AA)
         y += 8
+
+        # Filas de datos
         for etiqueta, valor in filas:
-            T.dibujar(lienzo, etiqueta, pad, y, 13, COL_TENUE)
+            T.dibujar(lienzo, etiqueta, x_txt, y, 12, (160, 180, 200), True)
             for renglon in valor:
-                T.dibujar(lienzo, renglon, pad + col, y, 13, COL_TEXTO)
-                y += 19
-            y += 3
-        y += 8
+                T.dibujar(lienzo, renglon, x_txt + col, y, 12, COL_TEXTO)
+                y += 17
+            y += 4
+
+        # Recuadro destacado para el dato curioso
+        y += 4
+        box_h = 16 * len(dato) + 24
+        bx0, by0, bx1, by1 = x_txt - 2, y, W - pad, min(y + box_h, H - pad + 4)
+        roi_d = lienzo[by0:by1, bx0:bx1]
+        if roi_d.size:
+            cv2.addWeighted(roi_d, 0.50, np.full_like(roi_d, (42, 32, 22)), 0.50, 0, dst=roi_d)
+            cv2.rectangle(lienzo, (bx0, by0), (bx1 - 1, by1 - 1), (65, 125, 175), 1, cv2.LINE_AA)
+        T.dibujar(lienzo, "¿Sabías que...?", bx0 + 8, by0 + 5, 11, COL_IZQ, True)
+        yd = by0 + 20
         for renglon in dato:
-            T.dibujar(lienzo, renglon, pad, y, 13, COL_IZQ)
-            y += 18
+            T.dibujar(lienzo, renglon, bx0 + 8, yd, 12, (235, 240, 245))
+            yd += 16
 
     def _ficha(self, nombre, opacidad=1.0):
-        """Ficha educativa (universo/fichas.py) abajo a la izquierda, sobre un panel translucido."""
+        """Ficha educativa abajo a la izquierda, con ligero desenfoque de fondo (cristal)."""
         if nombre not in FICHAS:
             return
         (x0, y0, x1, y1), _ = self._ficha_diseno(nombre)
         inv, pre = self._ficha_sprite(nombre)
         roi = self.buf[y0:y1, x0:x1]
-        if opacidad < 0.999:                               # desvaneciendose: mezcla con la opacidad
+        if opacidad > 0.15:
+            # Desenfoque de fondo (blur) para que las estrellas no distraigan al leer
+            fondo_blur = cv2.GaussianBlur(roi, (15, 15), 0)
+            roi = fondo_blur
+        if opacidad < 0.999:
             inv = 1.0 - opacidad * (1.0 - inv)
             pre = pre * opacidad
-        roi[:] = cv2.convertScaleAbs(cv2.add(cv2.multiply(roi.astype(np.float32), inv), pre))
+        self.buf[y0:y1, x0:x1] = cv2.convertScaleAbs(cv2.add(cv2.multiply(roi.astype(np.float32), inv), pre))
 
     def _seleccion(self, sel):
         """Anillo blanco semitransparente que se llena al dejar la palma sobre un astro."""
