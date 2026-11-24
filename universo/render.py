@@ -443,14 +443,14 @@ class Escena:
         if nombre in self._fichas_cache:
             return self._fichas_cache[nombre]
         f = FICHAS[nombre]
-        W, pad = min(C.FICHA_ANCHO, 315), 14
+        W, pad = min(C.FICHA_ANCHO, 320), 14
         col = max(self.medir_texto(e, 12, True)[0] for e, _ in f["filas"]) + 12
-        filas = [(e, self._envolver(v, 12, W - 2 * pad - col - 4)) for e, v in f["filas"]]
-        tipo = self._envolver(f["tipo"], 12, W - 2 * pad - 4)
-        dato = self._envolver(f["dato"], 12, W - 2 * pad - 18)
+        filas = [(e, self._envolver(v, 12, W - 2 * pad - col - 6)) for e, v in f["filas"]]
+        tipo = self._envolver(f["tipo"], 12, W - 2 * pad - 6)
+        dato = self._envolver(f["dato"], 12, W - 2 * pad - 14)
 
         alto_filas = sum(17 * len(v) + 4 for _, v in filas)
-        alto_dato = 16 * len(dato) + 26
+        alto_dato = 16 * len(dato) + 32
         alto = pad + 26 + 16 * len(tipo) + 12 + alto_filas + 8 + alto_dato + pad
 
         x0, y1 = 84, self.h - 86                 # esquina inferior izquierda, sin tocar zoom ni planeta
@@ -473,7 +473,7 @@ class Escena:
         return self._fichas_cache[clave]
 
     def _ficha_en(self, lienzo, nombre):
-        """Dibuja la ficha compacta con esquinas redondeadas, acento del astro y caja de dato curioso."""
+        """Dibuja la ficha con esquinas redondeadas, barra de color del astro y píldora '¿Sabías que...?'."""
         _, (col, tipo, filas, dato) = self._ficha_diseno(nombre)
         H, W = lienzo.shape[:2]
         pad, T = 14, self.texto
@@ -481,61 +481,75 @@ class Escena:
 
         # Máscara con esquinas redondeadas
         m_img = T.Image.new("L", (W, H), 0)
-        T.ImageDraw.Draw(m_img).rounded_rectangle((0, 0, W - 1, H - 1), radius=12, fill=255)
+        T.ImageDraw.Draw(m_img).rounded_rectangle((0, 0, W - 1, H - 1), radius=14, fill=255)
         masc = (np.asarray(m_img, np.float32) / 255.0)[..., None]
 
         # Fondo azul espacial oscuro con 92% de opacidad
-        fondo_card = np.full((H, W, 3), (28, 16, 12), np.float32)
+        fondo_card = np.full((H, W, 3), (32, 20, 14), np.float32)
         mezcla = lienzo.astype(np.float32) * (1.0 - 0.92 * masc) + fondo_card * (0.92 * masc)
         lienzo[:] = np.clip(mezcla, 0, 255).astype(np.uint8)
 
-        # Barra de acento a la izquierda
+        # Barra lateral gruesa del color del planeta (como en la imagen)
         barra = lienzo.copy()
-        cv2.rectangle(barra, (0, 0), (5, H), acento, -1)
+        cv2.rectangle(barra, (10, 14), (18, H - 14), acento, -1, cv2.LINE_AA)
         lienzo[:] = np.where(masc > 0.5, barra, lienzo)
 
-        # Borde redondeado sutil
+        # Borde redondeado luminoso tintado con el color del astro
         b_img = T.Image.new("L", (W, H), 0)
-        T.ImageDraw.Draw(b_img).rounded_rectangle((0, 0, W - 1, H - 1), radius=12, outline=255, width=2)
-        borde_m = (np.asarray(b_img, np.float32) / 255.0)[..., None] * 0.7
-        col_borde = np.array([min(c + 40, 255) for c in acento], np.float32)
+        T.ImageDraw.Draw(b_img).rounded_rectangle((0, 0, W - 1, H - 1), radius=14, outline=255, width=2)
+        borde_m = (np.asarray(b_img, np.float32) / 255.0)[..., None] * 0.78
+        col_borde = np.array([min(int(c * 0.85 + 45), 255) for c in acento], np.float32)
         lienzo[:] = np.clip(lienzo.astype(np.float32) * (1.0 - borde_m) + col_borde * borde_m, 0, 255).astype(np.uint8)
 
         # Encabezado
-        x_txt = pad + 3
+        x_txt = pad + 12
         y = pad
-        T.dibujar(lienzo, NOMBRES.get(nombre, nombre), x_txt, y, 20, COL_TEXTO, True)
+        T.dibujar(lienzo, NOMBRES.get(nombre, nombre), x_txt, y, 21, COL_TEXTO, True)
         y += 26
         for renglon in tipo:
             T.dibujar(lienzo, renglon, x_txt, y, 12, acento, True)
             y += 16
 
-        # Línea divisoria
+        # Línea divisoria sutil
         y += 5
-        cv2.line(lienzo, (x_txt, y), (W - pad, y), (70, 60, 52), 1, cv2.LINE_AA)
+        cv2.line(lienzo, (x_txt, y), (W - pad, y), (78, 66, 56), 1, cv2.LINE_AA)
         y += 8
 
         # Filas de datos
         for etiqueta, valor in filas:
-            T.dibujar(lienzo, etiqueta, x_txt, y, 12, (160, 180, 200), True)
+            T.dibujar(lienzo, etiqueta, x_txt, y, 12, (165, 185, 205), True)
             for renglon in valor:
                 T.dibujar(lienzo, renglon, x_txt + col, y, 12, COL_TEXTO)
                 y += 17
             y += 4
 
-        # Recuadro destacado para el dato curioso
+        # Caja inferior con píldora blanca "¿Sabías que...?"
         y += 4
-        box_h = 16 * len(dato) + 24
+        box_h = 16 * len(dato) + 30
         bx0, by0, bx1, by1 = x_txt - 2, y, W - pad, min(y + box_h, H - pad + 4)
-        roi_d = lienzo[by0:by1, bx0:bx1]
-        if roi_d.size:
-            cv2.addWeighted(roi_d, 0.50, np.full_like(roi_d, (42, 32, 22)), 0.50, 0, dst=roi_d)
-            cv2.rectangle(lienzo, (bx0, by0), (bx1 - 1, by1 - 1), (65, 125, 175), 1, cv2.LINE_AA)
-        T.dibujar(lienzo, "¿Sabías que...?", bx0 + 8, by0 + 5, 11, COL_IZQ, True)
-        yd = by0 + 20
-        for renglon in dato:
-            T.dibujar(lienzo, renglon, bx0 + 8, yd, 12, (235, 240, 245))
-            yd += 16
+        if by1 > by0 + 10:
+            roi_d = lienzo[by0:by1, bx0:bx1]
+            cv2.addWeighted(roi_d, 0.48, np.full_like(roi_d, (46, 34, 24)), 0.52, 0, dst=roi_d)
+            cv2.rectangle(lienzo, (bx0, by0), (bx1 - 1, by1 - 1), col_borde.astype(int).tolist(), 1, cv2.LINE_AA)
+
+            # Píldora clara "¿Sabías que...?"
+            pw, ph = 114, 18
+            px0, py0 = bx0 + 8, by0 + 5
+            p_img = T.Image.new("L", (pw, ph), 0)
+            T.ImageDraw.Draw(p_img).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=6, fill=255)
+            pm = (np.asarray(p_img, np.float32) / 255.0)[..., None]
+            roi_p = lienzo[py0:py0 + ph, px0:px0 + pw]
+            if roi_p.shape[:2] == (ph, pw):
+                lienzo[py0:py0 + ph, px0:px0 + pw] = np.clip(
+                    roi_p.astype(np.float32) * (1.0 - pm) + np.array([235, 240, 245], np.float32) * pm,
+                    0, 255
+                ).astype(np.uint8)
+            T.dibujar(lienzo, "¿Sabías que...?", px0 + pw // 2, py0 + 2, 11, (28, 22, 18), True, "c")
+
+            yd = by0 + 27
+            for renglon in dato:
+                T.dibujar(lienzo, renglon, bx0 + 8, yd, 12, (235, 240, 245))
+                yd += 16
 
     def _ficha(self, nombre, opacidad=1.0):
         """Ficha educativa abajo a la izquierda, con ligero desenfoque de fondo (cristal)."""
