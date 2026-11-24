@@ -632,7 +632,7 @@ class Escena:
         alt = self.astros.get("altitud_km", 0.0)
         if modo == "sistema":
             T.dibujar(b, f"SISTEMA SOLAR   ·   1 UA = {_km(A.UA_KM)}   ·   inclinación de la vista "
-                         f"{self.astros.get('inclinacion_vista', 0.0):.0f}°   ·   escala {self.astros.get('px_ua', 0.0):.0f} px/UA",
+                         f"{self.astros.get('inclinacion_vista', 0.0):.0f}°   ·   distancias y tamaños no a escala",
                       20, 48, 16, COL_TEXTO)
         else:
             T.dibujar(b, self._lento(("lugar", modo, self.astros.get("foco")), C.HUD_REFRESCO_HZ,

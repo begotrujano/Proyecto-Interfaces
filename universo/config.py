@@ -136,11 +136,16 @@ PUNTO_ASTRO_MIN = 1.2              # radio (px) bajo el cual un planeta se dibuj
 # ----------------------------------------------------------------------
 # Vista del Sistema Solar completo (tecla S, o palma sobre el astro donde estas)
 # ----------------------------------------------------------------------
-SISTEMA_RADIO_REL = 0.40           # a zoom x1 la orbita del planeta activo mas lejano ocupa esta fraccion del alto
+SISTEMA_RADIO_REL = 0.62           # a zoom x1 la orbita del planeta activo mas lejano ocupa esta fraccion del alto
+# Distancias NO a escala (a escala, los planetas interiores quedan dentro del Sol): r -> R0*ln(1 + r/R0).
+# Cerca del Sol casi no cambia y lejos se comprime; la direccion de cada planeta es la real.
+# Mas chico = mas comprimido (y mas espacio para los interiores); muy grande = a escala.
+SISTEMA_DISTANCIA_R0 = 0.4         # UA
 SISTEMA_INCLINACION = 52.0         # grados de inclinacion inicial de la vista (90 = de canto, 0 = desde arriba)
 SISTEMA_GIRO_INICIAL = 35.0        # grados
-SISTEMA_ICONO_PLANETA = 12.0       # radio (px) de un planeta a zoom x1 (crece con el zoom, suave)
-SISTEMA_ICONO_SOL = 19.0
+SISTEMA_ICONO_PLANETA = 7.0        # radio (px) de la Tierra a zoom x1 (crece con el zoom, suave)
+SISTEMA_ICONO_EXP = 0.5            # tamanos NO a escala: radio del icono ~ radio real ** EXP (1 = a escala)
+SISTEMA_ICONO_SOL = 30.0           # el Sol a escala seria enorme: su propio tamano, el mayor de todos
 SISTEMA_MOSTRAR_PENDIENTES = True  # orbitas y puntos de los planetas que aun no se implementan
 SISTEMA_TRANSICION = 0.55          # s del fundido al entrar o salir de la vista
 
