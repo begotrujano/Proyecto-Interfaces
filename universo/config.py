@@ -23,6 +23,8 @@ RAIZ = Path(__file__).resolve().parent.parent   # carpeta del proyecto (la de ma
 
 ANCHO, ALTO = 1280, 720            # resolucion interna del lienzo
 FPS_RENDER = 60
+HUD_REFRESCO_HZ = 10.0              # veces por s que se rehacen los textos que cambian siempre (altitud, coordenadas)
+INFO_REFRESCO_HZ = 5.0             # lo mismo para la informacion de depuracion (tecla H): fps, latencias, ratios de la mano
 RADIO_BASE_REL = 0.24              # radio de la Tierra a escala 1 (fraccion del alto)
 TEXTURA = "assets/tierra_nasa_bluemarble.jpg"   # relativo a RAIZ; si falta, se genera una procedural
 LONGITUD_INICIAL = -99.0           # grados; -99 = Mexico al centro

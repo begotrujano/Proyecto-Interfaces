@@ -207,6 +207,19 @@ DATOS_COMP = {
 }
 
 
+_PLANOS = {}
+
+
+def _plano(forma, color):
+    """Un lienzo de un solo color, hecho una vez (el comparador lo mezclaba en cada cuadro con np.full_like: 2.7 MB nuevos)."""
+    clave = (forma, tuple(color))
+    p = _PLANOS.get(clave)
+    if p is None:
+        p = _PLANOS[clave] = np.full(forma, color, np.uint8)
+        p.flags.writeable = False
+    return p
+
+
 def _ease_salida(x):
     """Entrada con un pequeño rebote (0 → 1)."""
     x = min(max(x, 0.0), 1.0)
@@ -412,7 +425,7 @@ class ComparadorTamanos:
         if not self._listos(dibs):                               # sin textura grande se vería borroso y saltaría
             self._t_inicio = t
             self._t_prev = t
-            cv2.addWeighted(buf, 0.18, np.full_like(buf, (14, 10, 8)), 0.82, 0, dst=buf)
+            cv2.addWeighted(buf, 0.18, _plano(buf.shape, (14, 10, 8)), 0.82, 0, dst=buf)
             T.dibujar(buf, "Preparando los astros…", w * 0.5, h * 0.5, 20, COL_TENUE, False, "c")
             return
         self._avanzar_giros(self.par, t)
@@ -420,7 +433,7 @@ class ComparadorTamanos:
         anim = (t - self._t_inicio) / max(C.COMPARADOR_ENTRADA, 1e-3)
         crece = max(_ease_salida(anim), 0.02)
         fondo = 0.985 * _ease_cubica(anim * 2.0)                  # el fondo se oscurece mientras entran
-        cv2.addWeighted(buf, 1.0 - fondo, np.full_like(buf, (14, 10, 8)), fondo, 0, dst=buf)
+        cv2.addWeighted(buf, 1.0 - fondo, _plano(buf.shape, (14, 10, 8)), fondo, 0, dst=buf)
 
         ra, rb = DATOS_EDU[a]["radio_km"], DATOS_EDU[b]["radio_km"]
         mayor, menor = max(ra, rb), min(ra, rb)

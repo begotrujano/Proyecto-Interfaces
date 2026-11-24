@@ -1591,6 +1591,38 @@ def test_voz_en_la_aplicacion():
     print("  voz: viajes, comparador, quiz, vistas, gravedad, capas, tiempo, zoom, giro y control OK")
 
 
+def test_texto_rapido():
+    """El texto que cambia en cada cuadro (altitud, fps, ratios de la mano) ya no vuelve a trazarse con Pillow en cada
+    cuadro: se refresca unas veces por segundo; y el sello nuevo (una sola pasada + contorno por dilatacion) conserva
+    el texto y el contorno."""
+    from types import SimpleNamespace
+    from universo.render import Escena, Texto
+    esc = SimpleNamespace(_lentos={})
+    llamadas = []
+    def producir():
+        llamadas.append(1)
+        return f"valor {len(llamadas)}"
+    t0 = time.perf_counter()
+    vistos = set()
+    while time.perf_counter() - t0 < 0.5:                           # 0.5 s a 100 consultas por segundo, a 5 Hz
+        vistos.add(Escena._lento(esc, "x", 5.0, producir))
+        time.sleep(0.01)
+    assert 2 <= len(llamadas) <= 5, len(llamadas)                  # ~3 refrescos, no 50
+    assert Escena._lento(esc, "x", 5.0, producir) == Escena._lento(esc, "x", 5.0, producir)
+    assert Escena._lento(esc, "otra", 5.0, lambda: "distinta") == "distinta"      # cada clave la suya
+    T = Texto()
+    for tam, neg in ((13, False), (21, True)):
+        pre, alfa, ox, oy = T.sello("Altitud 12 345 km · Sobre 23° N", tam, (235, 235, 235), neg)
+        assert pre.shape[:2] == alfa.shape and pre.max() > 200 and alfa.max() == 255
+        assert (alfa > 0).sum() > (pre.max(axis=2) > 0).sum()          # el contorno rodea al texto (no lo reemplaza)
+    t0 = time.perf_counter()
+    for i in range(30):
+        T.sello(f"dibujo {i} fps · cámara 59 fps (exp. auto) · detección 31 fps ({i} ms) · giro +1.50 incl. +0.20 rad/s", 13, (150, 150, 150), False)
+    ms = (time.perf_counter() - t0) / 30 * 1000
+    assert ms < 8.0, ms                                            # antes ~9 ms en esta maquina
+    print(f"  sello de una linea larga: {ms:.1f} ms")
+
+
 def test_anillos_fluidos_en_movimiento():
     """Saturno no se traba: mientras la vista cambia (viaje, giro, zoom) los anillos se calculan en baja resolucion
     (rapido) y, ya quieta, se afinan a calidad completa sin cambiar como se ven."""
@@ -1650,6 +1682,15 @@ def test_comparador_elegir_astros():
     menu._construir(1280, 720, "sistema", comp, grav, corte, quiz)
     assert not any(b[0].startswith("astro_") for b in menu.botones)
     print("  elegir astros del comparador OK")
+
+
+def test_comparador_sin_reservar_memoria():
+    """El fondo oscuro del comparador es un lienzo fijo: no se vuelve a reservar un cuadro entero en cada cuadro."""
+    from universo.modos import _plano
+    a = _plano((720, 1280, 3), (14, 10, 8))
+    assert a is _plano((720, 1280, 3), (14, 10, 8)) and a[5, 5].tolist() == [14, 10, 8]
+    assert not a.flags.writeable                                  # compartido: nadie debe escribirle encima
+    assert _plano((360, 640, 3), (14, 10, 8)) is not a
 
 
 def test_comparador():

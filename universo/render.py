@@ -4,6 +4,7 @@ acentos, via Pillow) y la camara en miniatura."""
 
 import math
 import threading
+import time
 from collections import OrderedDict, deque
 
 import cv2
@@ -54,6 +55,7 @@ class Texto:
         from PIL import Image, ImageDraw, ImageFont
         self.Image, self.ImageDraw, self.ImageFont = Image, ImageDraw, ImageFont
         self._fuentes = {}
+        self._nucleos = {}
         self._cache = OrderedDict()
 
     def _fuente(self, tam, negrita):
@@ -71,6 +73,11 @@ class Texto:
             self._fuentes[clave] = f
         return self._fuentes[clave]
 
+    def _nucleo(self, borde):
+        if borde not in self._nucleos:
+            self._nucleos[borde] = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * borde + 1, 2 * borde + 1))
+        return self._nucleos[borde]
+
     def sello(self, texto, tam, color, negrita):
         clave = (texto, tam, color, negrita)
         if clave in self._cache:
@@ -81,12 +88,10 @@ class Texto:
         l, t, r, b = f.getbbox(texto, stroke_width=borde)
         w, h = max(r - l + 2, 1), max(b - t + 2, 1)
         m_txt = self.Image.new("L", (w, h), 0)
-        m_bor = self.Image.new("L", (w, h), 0)
-        self.ImageDraw.Draw(m_bor).text((1 - l, 1 - t), texto, font=f, fill=255,
-                                        stroke_width=borde, stroke_fill=255)
-        self.ImageDraw.Draw(m_txt).text((1 - l, 1 - t), texto, font=f, fill=255)
+        self.ImageDraw.Draw(m_txt).text((1 - l, 1 - t), texto, font=f, fill=255)    # (un solo trazado de Pillow)
         a_txt = np.asarray(m_txt, np.float32) / 255.0
-        a_bor = np.asarray(m_bor, np.float32) / 255.0
+        # el contorno es el texto "engordado" borde px: dilatar es ~50 veces mas barato que trazar otra vez con Pillow
+        a_bor = cv2.dilate(a_txt, self._nucleo(borde))
         alfa = np.maximum(a_txt, a_bor * 0.7)
         pre = a_txt[..., None] * np.array(color, np.float32)
         s = ((pre + 0.5).astype(np.uint8), (alfa * 255 + 0.5).astype(np.uint8), -l + 1, -t + 1)
@@ -185,6 +190,7 @@ class Escena:
                           desfase_lon=C.DESFASE_TEXTURA_SOL, respaldo=lambda: textura_sol(1024))
         self.texto = Texto()
         self.buf = np.zeros((alto, ancho, 3), np.uint8)
+        self._lentos = {}                 # clave -> (cuando, texto): textos que cambian siempre y se refrescan solo unas veces por s
         self.radio_base = C.RADIO_BASE_REL * alto
         self._rastros = {}
         self.astros = {}
@@ -593,6 +599,15 @@ class Escena:
         self.buf[y0:y0 + alto, x0:x0 + ancho] = pip
         cv2.rectangle(self.buf, (x0, y0), (x0 + ancho, y0 + alto), (90, 90, 90), 1, cv2.LINE_AA)
 
+    def _lento(self, clave, hz, producir):
+        """Texto que cambia en cada cuadro (altitud, fps...): se rehace como mucho `hz` veces por segundo.
+        Si no, la cache de sellos fallaba en cada cuadro y Pillow lo volvia a trazar (hasta 13 ms por cuadro)."""
+        ahora = time.perf_counter()
+        v = self._lentos.get(clave)
+        if v is None or ahora - v[0] >= 1.0 / hz:
+            v = self._lentos[clave] = (ahora, producir())
+        return v[1]
+
     def _hud(self, log_escala, giro, inclinacion, estado, info, ver_info, modo="astro", comparando=False):
         b, T = self.buf, self.texto
         if estado.activo:
@@ -620,8 +635,9 @@ class Escena:
                          f"{self.astros.get('inclinacion_vista', 0.0):.0f}°   ·   escala {self.astros.get('px_ua', 0.0):.0f} px/UA",
                       20, 48, 16, COL_TEXTO)
         else:
-            T.dibujar(b, f"{NOMBRES.get(self.astros.get('foco', 'tierra'), '')}   ·   Altitud {_km(alt)}   ·   "
-                         f"Sobre {abs(lat):.0f}° {hemi}, {abs(lon):.0f}° {lado}", 20, 48, 16, COL_TEXTO)
+            T.dibujar(b, self._lento(("lugar", modo, self.astros.get("foco")), C.HUD_REFRESCO_HZ,
+                                     lambda: f"{NOMBRES.get(self.astros.get('foco', 'tierra'), '')}   ·   Altitud {_km(alt)}   ·   "
+                                             f"Sobre {abs(lat):.0f}° {hemi}, {abs(lon):.0f}° {lado}"), 20, 48, 16, COL_TEXTO)
 
         reloj = info.get("reloj")                          # (fecha, velocidad): el control del tiempo
         if reloj is not None:
@@ -631,9 +647,10 @@ class Escena:
 
         if ver_info:
             exp = info.get("exposicion")
-            T.dibujar(b, f"dibujo {info['fps_render']:.0f} fps  ·  cámara {info.get('fps_cam', 0):.0f} fps "
-                         f"(exp. {'auto' if exp is None else f'{exp:+.0f}'})  ·  detección {info['fps_det']:.0f} fps "
-                         f"({info['lat_ms']:.0f} ms)  ·  giro {estado.omega:+.2f}  incl. {estado.omega_v:+.2f} rad/s  ·  swipe: {estado.swipe}",
+            T.dibujar(b, self._lento("depuracion", C.INFO_REFRESCO_HZ, lambda:
+                      f"dibujo {info['fps_render']:.0f} fps  ·  cámara {info.get('fps_cam', 0):.0f} fps "
+                      f"(exp. {'auto' if exp is None else f'{exp:+.0f}'})  ·  detección {info['fps_det']:.0f} fps "
+                      f"({info['lat_ms']:.0f} ms)  ·  giro {estado.omega:+.2f}  incl. {estado.omega_v:+.2f} rad/s  ·  swipe: {estado.swipe}"),
                       20, 74, 13, COL_TENUE)
             y = 94
             for v in sorted(estado.manos, key=lambda v: v.rol):
@@ -641,8 +658,9 @@ class Escena:
                     continue
                 nombre = "Izquierda" if v.rol == "izq" else "Derecha"
                 pose = "PUÑO" if v.puno else ("OK" if v.ok else "abierta")
-                T.dibujar(b, f"{nombre}: {pose:7s}  puño {v.ratio_puno:.2f} (<{C.PUNO_ON})   "
-                             f"ok {v.ratio_ok:.2f} (<{C.OK_ON})   dedos {v.estirados}/3",
+                T.dibujar(b, self._lento(("mano", v.rol), C.INFO_REFRESCO_HZ, lambda:
+                          f"{nombre}: {pose:7s}  puño {v.ratio_puno:.2f} (<{C.PUNO_ON})   "
+                          f"ok {v.ratio_ok:.2f} (<{C.OK_ON})   dedos {v.estirados}/3"),
                           20, y, 13, COL_IZQ if v.rol == "izq" else COL_DER)
                 y += 19
             T.dibujar(b, "Espacio pausa · R reset · S sistema · C comparar · G gravedad · X corte · K quiz · , . tiempo · T ahora · D ficha · H info · F full · Q salir",
