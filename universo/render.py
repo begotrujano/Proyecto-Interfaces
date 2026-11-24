@@ -29,6 +29,7 @@ COL_IZQ = (40, 178, 255)        # BGR ambar   -> zoom
 COL_DER = (255, 208, 84)        # BGR cian    -> giro
 COL_GRIS = (175, 175, 175)
 COL_OK = (110, 230, 120)
+COL_SALIDA = (255, 255, 255)    # anillo de carga para salir al Sistema Solar
 COL_TEXTO = (235, 235, 235)
 COL_TENUE = (150, 150, 150)
 CONEXIONES = [
@@ -237,21 +238,30 @@ class Escena:
 
     # ------------------------------------------------------------------
     def componer(self, log_escala, giro, estado, info, frame=None, ver_camara=True, ver_info=True, t=0.0,
-                 inclinacion=None, fecha=None, foco="tierra", viaje=None, seleccion=None, modo="astro"):
+                 inclinacion=None, fecha=None, foco="tierra", viaje=None, seleccion=None, modo="astro",
+                 salida=None):
         if inclinacion is None:
             inclinacion = estado.inclinacion
         self._foco_actual = foco                          # para no liberar su textura (carga bajo demanda)
+        # salida (viaje.Salida): vuelo hacia afuera; primero en la vista del astro, luego en la del sistema
+        fase = salida.estado(t) if salida is not None else None
+        if fase is not None:
+            modo = fase["modo"]
         ficha = info.get("ficha")                          # (nombre, opacidad): ficha educativa del astro
-        ficha_visible = ficha is not None and modo == "astro" and viaje is None and ficha[1] > 0.01
+        ficha_visible = (ficha is not None and modo == "astro" and viaje is None and fase is None
+                         and ficha[1] > 0.01)
         self._ocupado = [self._ficha_diseno(ficha[0])[0]] if ficha_visible and ficha[0] in FICHAS else []
         self._destino = viaje.nombre if viaje is not None else None
         if modo != self._modo:                             # fundido entre la vista de un astro y la del sistema
-            self._fundido = (self.buf.copy(), t)
+            if fase is None:                               # (la salida no lo necesita: el corte coincide)
+                self._fundido = (self.buf.copy(), t, C.SISTEMA_TRANSICION)
             self._modo = modo
         if modo == "sistema":
-            self._sistema(log_escala, giro, inclinacion, fecha or fecha_actual(), foco)
+            self._sistema(log_escala, giro, inclinacion, fecha or fecha_actual(), foco,
+                          fase if fase is not None and fase["modo"] == "sistema" else None)
         else:
-            self._espacio(log_escala, giro, inclinacion, fecha or fecha_actual(), foco, viaje, t)
+            self._espacio(log_escala, giro, inclinacion, fecha or fecha_actual(), foco, viaje, t,
+                          fase["camara"] if fase is not None else None)
         if seleccion is not None:
             self._seleccion(seleccion)
         modos = info.get("modos")
@@ -270,7 +280,7 @@ class Escena:
                 gravedad.dibujar(self, foco)
             comparador.dibujar(self, A.dia_juliano(fecha or fecha_actual()), t)
             quiz.dibujar(self, t)
-        if estado.activo and not comparando:
+        if estado.activo and not comparando and fase is None:
             self._barra_zoom(log_escala, estado.zoom_agarrado)
         menu = info.get("menu")
         if menu is not None:
@@ -284,7 +294,7 @@ class Escena:
         self._hud(log_escala, giro, inclinacion, estado, info, ver_info, modo, comparando or quiz_activo)
         self._avisos(estado, t)
         if self._fundido is not None:
-            a = 1.0 - (t - self._fundido[1]) / max(C.SISTEMA_TRANSICION, 1e-3)
+            a = 1.0 - (t - self._fundido[1]) / max(self._fundido[2], 1e-3)
             if a > 0.0 and self._fundido[0].shape == self.buf.shape:
                 cv2.addWeighted(self._fundido[0], a, self.buf, 1.0 - a, 0.0, dst=self.buf)
             else:
@@ -317,8 +327,9 @@ class Escena:
         d = R * A.distancia_para_radio(radio, self.focal)
         return A.Camara.en_astro(giro, inclinacion, d, self.focal, self.w / 2.0, self.h / 2.0, centro, rot)
 
-    def _espacio(self, log_escala, giro, inclinacion, fecha, foco="tierra", viaje=None, t=0.0):
-        """Cielo y astros vistos desde la camara, de lejos a cerca (el Sol tambien es un astro)."""
+    def _espacio(self, log_escala, giro, inclinacion, fecha, foco="tierra", viaje=None, t=0.0, cam=None):
+        """Cielo y astros vistos desde la camara, de lejos a cerca (el Sol tambien es un astro).
+        cam: camara dada (la salida al sistema); sin etiquetas, como en el viaje."""
         b = self.buf
         jd = A.dia_juliano(fecha)
         cuerpos = self._cuerpos(jd)
@@ -326,6 +337,8 @@ class Escena:
         if viaje is not None:
             pos, objetivo, hiper, arriba = viaje.camara(t)
             cam = A.Camara.mirando(pos, objetivo, self.focal, self.w / 2.0, self.h / 2.0, arriba)
+        elif cam is not None:
+            hiper = 1.0
         else:
             cam = self.camara(log_escala, giro, inclinacion, foco, jd, cuerpos)
         sol_centro = cuerpos["sol"][0]
@@ -379,8 +392,9 @@ class Escena:
         if C.ETIQUETAS_ASTROS and hiper < 0.05:
             self._etiquetas()
 
-    def _sistema(self, log_escala, giro, inclinacion, fecha, foco):
-        self.astros = self.vista_sistema.dibujar(self.buf, A.dia_juliano(fecha), log_escala, giro, inclinacion, foco)
+    def _sistema(self, log_escala, giro, inclinacion, fecha, foco, transicion=None):
+        self.astros = self.vista_sistema.dibujar(self.buf, A.dia_juliano(fecha), log_escala, giro, inclinacion, foco,
+                                                 transicion)
 
     def medir_texto(self, texto, tam, negrita):
         alfa = self.texto.sello(texto, tam, COL_TEXTO, negrita)[1]
@@ -523,6 +537,10 @@ class Escena:
                         else (math.pi, 0.0, -math.pi / 2, math.pi / 2))    # agarre: en 4 direcciones
                 for a in angs:
                     _flecha(b, x + 34 * math.cos(a), y + 34 * math.sin(a), a, col)
+                salida = getattr(v, "progreso_salida", 0.0)
+                if v.accion == "zoom" and salida > 0:        # jalando bajo el tope: carga hacia el sistema
+                    cv2.ellipse(b, _p(x, y), (22 * 16, 22 * 16), -90, 0, int(360 * salida),
+                                COL_SALIDA, 5, cv2.LINE_AA, 4)
             elif v.accion in ("swipe", "swipe_v"):
                 cv2.circle(b, _p(x, y), 18 * 16, col, 3, cv2.LINE_AA, 4)
                 cv2.circle(b, _p(x, y), 4 * 16, col, -1, cv2.LINE_AA, 4)

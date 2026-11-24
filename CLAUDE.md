@@ -7,7 +7,7 @@ Proyecto de Interfaces Avanzadas (UV, 5.º semestre). Es un explorador educativo
 - `requirements.txt`: opencv-python (5.1), mediapipe (1.2.3), numpy (2.5), pillow (13).
 - Modelo `modelos/gesture_recognizer.task`. Se usan sus landmarks 2D/3D y la etiqueta de mano; las poses se calculan con geometría propia.
 - Ejecutar: `.venv\Scripts\python.exe main.py` (opciones: `--camara 1 --dshow --pantalla-completa`)
-- Pruebas sin cámara: `.venv\Scripts\python.exe pruebas\test_proyecto.py` (52 pruebas; deben pasar siempre. `test_integracion_hilos` exige >40 FPS y puede fallar si la laptop esta en ahorro de energia).
+- Pruebas sin cámara: `.venv\Scripts\python.exe pruebas\test_proyecto.py` (54 pruebas; deben pasar siempre. `test_integracion_hilos` exige >40 FPS y puede fallar si la laptop esta en ahorro de energia).
 
 ## Estructura de carpetas
 - `main.py` (entrada) · `requirements.txt` · `CLAUDE.md` (debe estar en la raíz: Claude Code solo lo lee ahí).
@@ -26,7 +26,7 @@ Proyecto de Interfaces Avanzadas (UV, 5.º semestre). Es un explorador educativo
   - `soltando` congela las acciones mientras el puño se abre. Dos velocidades: filtrada (swipes) y cruda (saltos del rastreo).
 - `universo/control.py` (**solo numpy**, con lock):
   - OK sostenido 0.3 s activa o pausa. Pausa automática tras 6 s sin manos.
-  - **Izquierda:** puño + subir/bajar = zoom logarítmico (×0.08–×6).
+  - **Izquierda:** puño + subir/bajar = zoom logarítmico (×0.08–×6). En un astro, al llegar al tope de alejar y seguir bajando el puño (`SALIDA_EXCESO`) y sostenerlo (`SALIDA_SOSTENER`), se llena un anillo blanco en el cursor y la cámara sale volando hacia la vista del Sistema Solar, sin texto (`viaje.Salida`: retrocede en línea recta cada vez más rápido; cuando el astro mide `SALIDA_RADIO_CORTE` px cambia a la vista del sistema con el MISMO encuadre (mismos ejes, centrada en el astro, misma escala y proyección en perspectiva, así que el Sol y los planetas no saltan) y sigue alejándose mientras la perspectiva se vuelve ortográfica, las órbitas aparecen (`SALIDA_FUNDIDO`), la vista gira a la inclinación de siempre por el camino más corto y el centro pasa al Sol. `VistaSistema.dibujar(..., transicion=)` dibuja ese estado). `main` lo habilita con `permitir_salida` (solo en modo astro, sin viaje, comparador ni quiz) y lo consume con `tomar_salida`; subir el puño o abrirlo lo cancela.
   - **Derecha:** swipe con la mano abierta da impulso proporcional y aditivo (en contra frena). Horizontal = gira (`giro`, `omega`); vertical = inclina (`inclinacion`, `omega_v`; tope ±90° en los polos; fricción propia más fuerte, `FRICCION_V_VIDA_MEDIA`). Cada swipe va en un solo eje: el dominante, medido en movimiento físico (`SWIPE_DOMINANCIA`, corrige el aspecto 4:3 de la cámara); los diagonales no cuentan. `_swipe_dir` = ±1 horizontal, ±2 vertical. Máquina `reposo/trazo/refractario/ignorando/salto`: ignora el regreso de la mano salvo que sea 1.6× más rápido, e ignora los saltos del rastreo. Con puño se agarra y arrastra en 2D; al soltar hereda las dos velocidades.
   - Expone `instantanea()` → `Estado`/`ManoVista`.
 - **Cámara, no astros:** `giro`/`inclinacion` de `control.py` ya no giran la Tierra: dicen dónde está la cámara (sobre lon = −giro, lat = −inclinación) y el zoom, a qué distancia (`distancia_para_radio`, campo de visión `CAMPO_VISION_V`). Los gestos no cambiaron. Al orbitar, las estrellas se deslizan al lado contrario de la superficie de enfrente (es lo físicamente correcto).
@@ -69,7 +69,7 @@ Proyecto de Interfaces Avanzadas (UV, 5.º semestre). Es un explorador educativo
 Espacio activar/pausar · **S sistema solar (entrar/salir)** · **. / , tiempo más rápido / más lento o hacia atrás · T volver al ahora** · **D ficha (fijar/ocultar)** · R reiniciar · I intercambiar manos · [ ] exposición (E = automática) · V cámara · H info · F pantalla completa · Q/Esc salir.
 
 ## Estado y pendientes
-- Pruebas simuladas: 52 (50 pasaban al agregar la voz; fallaban `test_fichas_educativas`, que espera opacidad 0 a 1.5 s del fin de la ficha cuando el desvanecimiento dura 2.5 s, y `test_integracion_hilos` por FPS en la maquina de revision; conectada a la corriente; con batería `test_integracion_hilos` puede fallar por FPS). **Falta validar con la cámara real** y calibrar OK_ON, CAM_EXPOSICION, PUNO_ON, SWIPE_V_ON, GANANCIA_ZOOM y la inclinación (OMEGA_V_MAX, FRICCION_V_VIDA_MEDIA). También falta confirmar que la mano izquierda/derecha sale correcta (si no, tecla I o `INVERTIR_MANOS`).
+- Pruebas simuladas: 54 (52 pasaban al agregar la voz; fallaban `test_fichas_educativas`, que espera opacidad 0 a 1.5 s del fin de la ficha cuando el desvanecimiento dura 2.5 s, y `test_integracion_hilos` por FPS en la maquina de revision; conectada a la corriente; con batería `test_integracion_hilos` puede fallar por FPS). **Falta validar con la cámara real** y calibrar OK_ON, CAM_EXPOSICION, PUNO_ON, SWIPE_V_ON, GANANCIA_ZOOM y la inclinación (OMEGA_V_MAX, FRICCION_V_VIDA_MEDIA). También falta confirmar que la mano izquierda/derecha sale correcta (si no, tecla I o `INVERTIR_MANOS`).
 - Por decidir:
   - si el OK también pausa;
   - la pausa automática;

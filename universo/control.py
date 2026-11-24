@@ -30,7 +30,8 @@ from universo.manos import a_lienzo
 
 ManoVista = namedtuple(
     "ManoVista",
-    "id rol x y norm visible puno ok progreso_ok accion ratio_puno ratio_ok estirados")
+    "id rol x y norm visible puno ok progreso_ok accion ratio_puno ratio_ok estirados progreso_salida",
+    defaults=(0.0,))
 Estado = namedtuple(
     "Estado", "activo log_escala giro omega manos avisos zoom_agarrado giro_agarrado swipe invertido "
               "inclinacion omega_v", defaults=(0.0, 0.0))
@@ -54,6 +55,8 @@ class Control:
         self._t_render = None
         self._sin_manos_desde = None
         self._vistas = ()
+        self.salida_permitida = False       # main la enciende solo orbitando un astro (no en el sistema)
+        self._salida_pedida = False
 
     # ------------------------------------------------------------------
     def reiniciar(self):
@@ -77,6 +80,22 @@ class Control:
         self._swipe_dir_cand = 0
         self._swipe_pico = 0.0
         self._omega_inicio = 0.0
+        self._salida_exceso = 0.0          # log de zoom "jalado" por debajo del tope
+        self._salida_progreso = 0.0        # 0..1: anillo de carga para ir al Sistema Solar
+        self._salida_bloq = False          # tras disparar, hay que soltar el puno para volver a cargar
+
+    def permitir_salida(self, si):
+        """main dice si jalar bajo el tope del zoom lleva al Sistema Solar (solo orbitando un astro)."""
+        with self.lock:
+            self.salida_permitida = bool(si) and C.SALIDA_SISTEMA
+            if not self.salida_permitida:
+                self._salida_exceso = self._salida_progreso = 0.0
+
+    def tomar_salida(self):
+        """True una sola vez cuando se completo el anillo de salida (lo consume main)."""
+        with self.lock:
+            pedida, self._salida_pedida = self._salida_pedida, False
+            return pedida
 
     def alternar_activo(self):
         """Respaldo con teclado (barra espaciadora) por si el OK falla en una demo."""
@@ -191,6 +210,8 @@ class Control:
     def _soltar(self, t):
         self._soltar_giro()
         self.zoom_mano = None
+        self._salida_exceso = self._salida_progreso = 0.0
+        self._salida_bloq = False
 
     def _activar(self, on, t, motivo=None):
         self.activo = on
@@ -220,8 +241,10 @@ class Control:
             if self.activo:
                 izq = [m for m in vis if self._rol(m) == "izq"]
                 der = [m for m in vis if self._rol(m) == "der"]
-                self._zoom(izq[0] if izq else None, t, acciones)
+                self._zoom(izq[0] if izq else None, t, acciones, dt)
                 self._giro(der[0] if der else None, t, dt, acciones)
+            else:
+                self._salida_exceso = self._salida_progreso = 0.0
 
             self._vistas = tuple(self._vista(m, progreso.get(m.id, 0.0), acciones.get(m.id))
                                  for m in manos.values())
@@ -253,19 +276,39 @@ class Control:
                         self._activar(False, t)
         return progreso
 
-    def _zoom(self, m, t, acciones):
+    def _zoom(self, m, t, acciones, dt=1 / 30):
         if m is None or not m.puno or m.edad(t) < C.EDAD_MINIMA_MANO:
             self.zoom_mano = None
+            self._salida_exceso = self._salida_progreso = 0.0
+            self._salida_bloq = False                     # soltar el puno rearma la salida
             return
         _, y = a_lienzo(m.palma, self.W, self.H)
         if self.zoom_mano != m.id or m.soltando:
             self.zoom_mano, self._y_prev = m.id, y        # agarra sin saltos / congela al soltar
+            self._salida_exceso = self._salida_progreso = 0.0
         else:
-            dlog = -C.GANANCIA_ZOOM * (y - self._y_prev) / self.H
-            self.log_escala = float(np.clip(self.log_escala + dlog,
-                                            math.log(C.ESCALA_MIN), math.log(C.ESCALA_MAX)))
+            lo = math.log(C.ESCALA_MIN)
+            crudo = self.log_escala - C.GANANCIA_ZOOM * (y - self._y_prev) / self.H
+            self.log_escala = float(np.clip(crudo, lo, math.log(C.ESCALA_MAX)))
             self._y_prev = y
+            self._salida(crudo, lo, dt)
         acciones[m.id] = "zoom"
+
+    def _salida(self, crudo, lo, dt):
+        """En el tope del zoom, seguir bajando el puno llena un anillo; lleno = ir al Sistema Solar."""
+        if not self.salida_permitida or self._salida_bloq:
+            self._salida_exceso = self._salida_progreso = 0.0
+            return
+        if self.log_escala > lo + C.SALIDA_TOLERANCIA:    # subio el puno (zoom de nuevo): cancela
+            self._salida_exceso = self._salida_progreso = 0.0
+            return
+        if crudo < lo:
+            self._salida_exceso += lo - crudo             # lo que "jala" por debajo del tope
+        if self._salida_exceso >= C.SALIDA_EXCESO:
+            self._salida_progreso += dt / max(C.SALIDA_SOSTENER, 1e-3)
+            if self._salida_progreso >= 1.0:
+                self._salida_pedida, self._salida_bloq = True, True
+                self._salida_exceso = self._salida_progreso = 0.0
 
     def _giro(self, m, t, dt, acciones):
         if m is None or m.edad(t) < C.EDAD_MINIMA_MANO:
@@ -367,8 +410,9 @@ class Control:
 
     def _vista(self, m, progreso, accion):
         x, y = a_lienzo(m.palma, self.W, self.H)
+        salida = min(self._salida_progreso, 1.0) if m.id == self.zoom_mano else 0.0
         return ManoVista(m.id, self._rol(m), x, y, m.norm.copy(), m.visible, m.puno, m.ok,
-                         progreso, accion, m.ratio_puno, m.ratio_ok, m.estirados)
+                         progreso, accion, m.ratio_puno, m.ratio_ok, m.estirados, salida)
 
     # ------------------------------------------------------------------
     # Hilo de dibujo

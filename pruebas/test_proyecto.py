@@ -171,6 +171,65 @@ def test_zoom_izquierda():
     assert s.escala < e1 * 0.7
 
 
+def test_zoom_tope_lleva_al_sistema():
+    """En un astro, con el zoom en el tope, seguir bajando el puno izquierdo llena el anillo del
+    cursor y pide ir al Sistema Solar. Subir el puno o abrir la mano lo cancela; sin permiso, nada."""
+    lo = math.log(C.ESCALA_MIN)
+
+    def preparar(permitir=True, escala=lo):
+        s = Sim(activo=True)
+        s.ctl.fijar_escala(escala)
+        s.ctl.permitir_salida(permitir)
+        s.correr(lambda t: [IZQ("abierta", y=0.5)], 0.4)
+        s.correr(lambda t: [IZQ("puno", y=0.5)], 0.3)
+        return s
+
+    def progreso(s):
+        return max((v.progreso_salida for v in s.ctl._vistas if v.accion == "zoom"), default=0.0)
+
+    # jalar abajo y sostener: el anillo se llena y se pide la salida una sola vez
+    s = preparar()
+    s.correr(lambda t: [IZQ("puno", y=lerp(0.5, 0.62, t / 0.3))], 0.35)
+    s.correr(lambda t: [IZQ("puno", y=0.62)], 0.4)
+    p = progreso(s)
+    print(f"  anillo de salida a medio sostener: {p:.2f}")
+    assert 0.1 < p < 1.0 and not s.ctl._salida_pedida
+    s.correr(lambda t: [IZQ("puno", y=0.62)], C.SALIDA_SOSTENER)
+    assert s.ctl.tomar_salida() and not s.ctl.tomar_salida(), "debe pedirse una vez"
+    assert abs(s.ctl.log_escala - lo) < 1e-9
+    s.correr(lambda t: [IZQ("puno", y=0.62)], 2.0)                    # seguir con el puno: no se repite
+    assert not s.ctl.tomar_salida() and progreso(s) == 0.0
+
+    # subir el puno (vuelve a acercar) cancela la carga
+    s = preparar()
+    s.correr(lambda t: [IZQ("puno", y=lerp(0.5, 0.62, t / 0.3))], 0.35)
+    s.correr(lambda t: [IZQ("puno", y=lerp(0.62, 0.45, t / 0.3))], 0.35)
+    s.correr(lambda t: [IZQ("puno", y=0.45)], 1.5)
+    assert not s.ctl.tomar_salida() and progreso(s) == 0.0 and s.ctl.log_escala > lo + 0.2
+
+    # abrir la mano a medio camino cancela
+    s = preparar()
+    s.correr(lambda t: [IZQ("puno", y=lerp(0.5, 0.62, t / 0.3))], 0.35)
+    s.correr(lambda t: [IZQ("puno", y=0.62)], 0.3)
+    s.correr(lambda t: [IZQ("abierta", y=0.62)], 1.5)
+    assert not s.ctl.tomar_salida()
+
+    # quedarse quieto en el tope sin jalar mas no carga; tampoco sin permiso (vista del sistema)
+    s = preparar()
+    s.correr(lambda t: [IZQ("puno", y=0.5)], 2.0)
+    assert not s.ctl.tomar_salida() and progreso(s) == 0.0
+    s = preparar(permitir=False)
+    s.correr(lambda t: [IZQ("puno", y=lerp(0.5, 0.65, t / 0.3))], 0.35)
+    s.correr(lambda t: [IZQ("puno", y=0.65)], 2.0)
+    assert not s.ctl.tomar_salida() and progreso(s) == 0.0
+
+    # alejar desde x1 hasta el tope: el zoom normal no se altera hasta llegar al tope
+    s = preparar(escala=0.0)
+    s.correr(lambda t: [IZQ("puno", y=lerp(0.5, 0.62, t / 0.3))], 0.35)
+    s.correr(lambda t: [IZQ("puno", y=0.62)], 2.0)
+    assert not s.ctl.tomar_salida() and s.ctl.log_escala > lo
+
+
 def test_giro_agarre_e_inercia():
     s = Sim(activo=True)
     s.correr(lambda t: [DER("abierta", x=0.6)], 0.4)
@@ -1162,6 +1221,103 @@ def test_cambio_de_vista_en_la_aplicacion():
     assert abs(x - 640) < 3 and abs(y - 360) < 3 and abs(r - app.escena.radio_base) < 3
     app.tecla(ord("r"))
     assert app.foco == "tierra" and app.modo == "astro"
+    # anillo de salida completo (puno de zoom jalado bajo el tope): vuelo hacia afuera, sin aviso
+    app.control.fijar_escala(math.log(C.ESCALA_MIN))
+    app.paso_render()
+    assert app.control.salida_permitida
+    avisos = len(app.control.avisos)
+    app.control._salida_pedida = True
+    app.paso_render()
+    assert app.salida is not None and app.ocupado and app.modo == "astro"
+    assert app.escena.astros["modo"] == "astro"                      # primero se aleja en la vista del astro
+    app.paso_render()
+    assert not app.control.salida_permitida                         # durante el vuelo no se vuelve a cargar
+    app.tecla(ord("s"))
+    assert app.salida is not None and app.modo == "astro", "la tecla S no interrumpe el vuelo"
+    sal = app.salida
+    t = time.perf_counter()
+    sal.t0 = t - 0.6 * sal.dur                                       # ya paso el corte: vista del sistema
+    app.paso_render()
+    assert sal.estado(time.perf_counter())["modo"] == "sistema" and app.escena.astros["modo"] == "sistema"
+    sal.t0 = t - sal.dur - 1                                         # termino
+    app.paso_render()
+    assert app.salida is None and app.modo == "sistema" and len(app.control.avisos) == avisos
+    assert abs(app.control.giro - sal.giro_final) < 1e-9 and abs(app.control.log_escala) < 1e-9
+    assert not app.reloj.congelado
+    app.alternar_sistema()
+    assert app.modo == "astro" and abs(app.control.log_escala - math.log(C.ESCALA_MIN)) < 1e-9
+
+
+def test_salida_al_sistema():
+    """Vuelo hacia afuera (viaje.Salida): arranca donde esta la camara, cambia a la vista del sistema
+    con el mismo encuadre (mismos ejes, centrada en el astro, misma escala) y termina en la vista
+    normal centrada en el Sol, girada lo menos posible desde la camara; el astro nunca se sale de la pantalla."""
+    import copy
+    from universo import astros as A
+    from universo import sistema as S
+    from universo.viaje import Salida, heliocentrica_astro, matriz_sistema
+    jd = 2461000.5
+    f, w, h = 989.0, 1280, 720
+    E = S.ecliptica_a_tierra(jd)
+    px_final = C.SISTEMA_RADIO_REL * h / 30.3
+
+    def angulo(M1, M0):
+        return math.acos(min(max((np.trace(M1 @ M0.T) - 1) / 2, -1.0), 1.0))
+
+    vistos = 0
+    for nombre, g, i in (("tierra", 1.0, 0.3), ("marte", -2.0, -0.6), ("neptuno", 0.4, 1.2), ("sol", 2.5, 0.1)):
+        if nombre == "tierra":
+            centro, R, rot = np.zeros(3), 1.0, np.eye(3)
+        else:
+            centro, R, rot = S.posicion(nombre, jd), S.radio_rt(nombre), S.rotacion(nombre, jd)
+        d0 = R * A.distancia_para_radio(C.RADIO_BASE_REL * h * C.ESCALA_MIN, f)
+        cam = A.Camara.en_astro(g, i, d0, f, w / 2, h / 2, centro, rot)
+        sal = Salida(10.0, cam, centro, R, heliocentrica_astro(nombre, jd, centro), E, px_final)
+        e0 = sal.estado(10.0)
+        assert e0["modo"] == "astro" and np.allclose(e0["camara"].pos, cam.pos) and np.allclose(e0["camara"].M, cam.M)
+        # momento del corte
+        ts = np.linspace(10.0, 10.0 + sal.dur, 2001)
+        modos = [sal.estado(t)["modo"] for t in ts]
+        k = modos.index("sistema")
+        assert all(m == "astro" for m in modos[:k]) and all(m == "sistema" for m in modos[k:])
+        antes, despues = sal.estado(ts[k - 1]), sal.estado(ts[k])
+        x, y, z = antes["camara"].proyectar_punto(centro)
+        r_antes = A.radio_aparente_px(R, float(np.linalg.norm(antes["camara"].pos - centro)), f)
+        assert abs(x - w / 2) < 1e-6 and abs(y - h / 2) < 1e-6 and abs(r_antes - C.SALIDA_RADIO_CORTE) < 0.1
+        assert angulo(despues["M"], sal.M_ecl) < 1e-3, "mismos ejes al cambiar de vista"
+        assert np.allclose(sal.M_ecl @ E.T, cam.M), "las estrellas no se mueven en el corte"
+        assert np.allclose(despues["centro"], sal.helio, atol=1e-6)
+        assert abs(despues["px_ua"] / sal.px_ua_corte - 1) < 0.02
+        assert despues["perspectiva"] > 0.999 and despues["aparicion"] < 0.1, "en el corte: perspectiva y sin orbitas"
+        # en el corte, cada astro visible cae en el mismo pixel en las dos vistas
+        cam_c = copy.copy(cam)
+        cam_c.pos = centro + cam.M[2] * despues["dist_ua"] * S.UA_RT
+        for otro in ["sol"] + [n for n in S.ORDEN if n != nombre]:
+            xa, ya, za = cam_c.proyectar_punto(np.zeros(3) if otro == "tierra" else S.posicion(otro, jd))
+            if za <= 0 or abs(xa - w / 2) > 3000 or abs(ya - h / 2) > 3000:
+                continue
+            q = despues["M"] @ (heliocentrica_astro(otro, jd) - despues["centro"])
+            den = 1 - despues["perspectiva"] * q[2] / despues["dist_ua"]
+            xs, ys = w / 2 + despues["px_ua"] * q[0] / den, h / 2 + despues["px_ua"] * q[1] / den
+            assert math.hypot(xs - xa, ys - ya) < 1.5, (nombre, otro, xa, ya, xs, ys)
+            vistos += 1
+        # final: la vista normal del sistema (centrada en el Sol, zoom x1, inclinacion de siempre)
+        fin = sal.estado(10.0 + sal.dur)
+        assert np.allclose(fin["centro"], 0.0, atol=1e-9) and abs(fin["px_ua"] - px_final) < 1e-6
+        assert np.allclose(fin["M"], matriz_sistema(sal.giro_final, 0.0)[0], atol=1e-9)
+        assert fin["perspectiva"] < 1e-9 and fin["aparicion"] == 1.0          # termina ortografica, como la vista normal
+        grilla = min(angulo(matriz_sistema(gg, 0.0)[0], sal.M_ecl) for gg in np.linspace(-math.pi, math.pi, 721))
+        assert angulo(sal.M_final, sal.M_ecl) <= grilla + 1e-6, "el giro final es el mas parecido a la camara"
+        # siempre se aleja, y el astro no se sale de la pantalla
+        esc = [sal.estado(t)["px_ua"] for t in ts[k:]]
+        assert all(b <= a + 1e-9 for a, b in zip(esc, esc[1:]))
+        off = max(float(np.hypot(*(st["M"] @ (sal.helio - st["centro"]))[:2]) * st["px_ua"])
+                  for st in (sal.estado(t) for t in ts[k:]))
+        print(f"  {nombre}: corte al {100 * (ts[k] - 10.0) / sal.dur:.0f} % del vuelo; el astro se aparta del centro "
+              f"hasta {off:.0f} px")
+        assert off < 0.45 * h
+    print(f"  {vistos} astros caen en el mismo pixel en las dos vistas al cambiar")
+    assert vistos >= 3
 
 
 def test_raton_control():

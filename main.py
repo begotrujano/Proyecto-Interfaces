@@ -35,7 +35,7 @@ from universo.control import Control
 from universo.manos import SeguidorManos
 from universo.render import Escena, fecha_actual
 from universo.reloj import Reloj
-from universo.viaje import Selector, Viaje
+from universo.viaje import Salida, Selector, Viaje, heliocentrica_astro
 from universo import astros as A
 from universo import sistema as S
 from universo import voz as V
@@ -286,6 +286,7 @@ class Aplicacion:
         self.foco = "tierra"              # astro que orbita la camara
         self.selector = Selector()
         self.viaje = None
+        self.salida = None                # vuelo hacia afuera, del astro a la vista del sistema (viaje.Salida)
         self.modo = "astro"               # "astro" (orbitando un astro) o "sistema" (todo el Sistema Solar)
         self._guardado = None             # (zoom, giro, inclinacion) del astro mientras ves el sistema
         self.reloj = Reloj(time.perf_counter())           # la fecha del cielo (teclas , . T)
@@ -321,8 +322,15 @@ class Aplicacion:
         self.fps_render = 0.9 * self.fps_render + 0.1 / max(dt, 1e-3)
 
         self.control.avanzar(t)
+        # en un astro, jalar el puno de zoom bajo el tope lleva a la vista del Sistema Solar
+        self.control.permitir_salida(self.modo == "astro" and not self.ocupado
+                                     and not self.comparador.activo and not self.quiz.activo)
         est = self.control.instantanea(t)
         self.suave.paso(est.log_escala, est.giro, est.inclinacion, dt)
+        if self.control.tomar_salida() and self.modo == "astro" and not self.ocupado:
+            self._salir_al_sistema(t)                     # sin texto: un vuelo hacia afuera
+        if self.salida is not None and self.salida.terminado(t):
+            self._fin_salida(t)
         self._fecha = self.reloj.fecha(t)
         info = {"fps_render": self.fps_render, "fps_det": self.deteccion.fps, "lat_ms": self.deteccion.lat_ms,
                 "fps_cam": getattr(self.captura, "fps", 0.0),
@@ -343,17 +351,17 @@ class Aplicacion:
         if self.viaje is not None and self.viaje.terminado(t):
             self._llegar()
         r = self._raton
-        bajo = None if (r["abajo"] or r["x"] < 0 or self.viaje is not None) else self._astro_bajo(r["x"], r["y"])
+        bajo = None if (r["abajo"] or r["x"] < 0 or self.ocupado) else self._astro_bajo(r["x"], r["y"])
         self.escena.resaltado = (self.escena.astros["objetivos"][bajo] + (bajo,)) if bajo else None
         objetivos = self.escena.astros.get("objetivos", {})
         self.comparador.actualizar(est, objetivos, self.modo, t)
         if not self.comparador.activo:                    # con el comparador abierto, estos modos no escuchan
             self.gravedad.actualizar(est, self.foco, dt, t, self._dim[0], self._dim[1])
-            self.corte.actualizar(est, self.modo, self.viaje)
+            self.corte.actualizar(est, self.modo, self.viaje or self.salida)
         self.quiz.actualizar(est, objetivos, self._dim[0], self._dim[1], t)
         accion_menu = self.menu.actualizar(
             est, self.modo, self.comparador, self.gravedad, self.corte, self.quiz,
-            self.viaje, self._dim[0], self._dim[1], t
+            self.viaje or self.salida, self._dim[0], self._dim[1], t
         )
         if accion_menu:
             self._accion_menu(accion_menu, t)
@@ -365,7 +373,7 @@ class Aplicacion:
         return self.escena.componer(self.suave.log_escala, self.suave.giro, est, info,
                                     self.captura.frame, self.ver_camara, self.ver_info, t,
                                     self.suave.inclinacion, fecha=self._fecha, foco=self.foco, viaje=self.viaje,
-                                    seleccion=seleccion, modo=self.modo)
+                                    seleccion=seleccion, modo=self.modo, salida=self.salida)
 
     # ------------------------------------------------------------------
     # Cambiar de astro: en pausa, palma encima del astro -> anillo blanco -> viaje
@@ -374,7 +382,7 @@ class Aplicacion:
         if self.quiz.activo or self.comparador.activo or self.menu.hover_id is not None:
             self.selector.reiniciar()
             return None
-        if est.activo or self.viaje is not None:
+        if est.activo or self.ocupado:
             self.selector.reiniciar()
             return None
         cursores = [(v.id, v.x, v.y) for v in est.manos if v.visible]
@@ -409,9 +417,9 @@ class Aplicacion:
                 delta = cv2.getMouseWheelDelta(flags)
             except Exception:
                 delta = 1 if flags > 0 else -1
-            if self.viaje is None and delta:
+            if not self.ocupado and delta:
                 self.control.zoom_raton(1.0 if delta > 0 else -1.0)
-        elif evento == cv2.EVENT_LBUTTONDOWN and self.viaje is None:
+        elif evento == cv2.EVENT_LBUTTONDOWN and not self.ocupado:
             r.update(abajo=True, x0=float(x), y0=float(y), mov=0.0, t=time.perf_counter())
             self.control.raton_agarrar()
         elif evento == cv2.EVENT_MOUSEMOVE and r["abajo"] and (flags & cv2.EVENT_FLAG_LBUTTON):
@@ -433,7 +441,7 @@ class Aplicacion:
 
     def clic(self, x, y):
         """Clic sobre un astro: viajar a el. En la vista del sistema, sobre el astro actual = volver."""
-        if self.viaje is not None:
+        if self.ocupado:
             return
         bid = self.menu.boton_en(x, y)
         if bid is not None:
@@ -457,7 +465,7 @@ class Aplicacion:
 
     def alternar_sistema(self, t=None):
         """Entra o sale de la vista del Sistema Solar completo (tecla S)."""
-        if self.viaje is not None:
+        if self.ocupado:
             return
         with self.control.lock:
             est_giro, est_incl, est_esc = self.control.giro, self.control.inclinacion, self.control.log_escala
@@ -473,6 +481,39 @@ class Aplicacion:
             self.control.colocar(giro, incl)
             self.control.fijar_escala(esc)
             self.control.avisar("Vista de " + NOMBRES.get(self.foco, self.foco))
+        self.suave.reiniciar()
+        self.selector.reiniciar()
+
+    @property
+    def ocupado(self):
+        """La camara esta en un viaje o en la salida al sistema: no se aceptan otros cambios de vista."""
+        return self.viaje is not None or self.salida is not None
+
+    def _salir_al_sistema(self, t):
+        """Puno de zoom jalado bajo el tope: vuelo hacia afuera hasta la vista del Sistema Solar."""
+        if self.ocupado or self.modo != "astro":
+            return
+        self.reloj.congelar(t)                           # nada se mueve mientras te alejas
+        self._fecha = self.reloj.fecha(t)
+        jd = A.dia_juliano(self._fecha)
+        cuerpos = self.escena._cuerpos(jd)
+        with self.control.lock:
+            self._guardado = (self.control.log_escala, self.control.giro, self.control.inclinacion)
+        cam = self.escena.camara(self.suave.log_escala, self.suave.giro, self.suave.inclinacion,
+                                 self.foco, jd, cuerpos)          # lo que se ve ahora mismo
+        centro, R = cuerpos[self.foco][0], cuerpos[self.foco][1]
+        self.salida = Salida(t, cam, centro, R, heliocentrica_astro(self.foco, jd, centro),
+                             S.ecliptica_a_tierra(jd), self.escena.vista_sistema.px_ua_base)
+        self.selector.reiniciar()
+
+    def _fin_salida(self, t):
+        """Fin del vuelo: queda la vista del sistema tal como termino (giro del lado desde el que mirabas)."""
+        s = self.salida
+        self.salida = None
+        self.modo = "sistema"
+        self.control.colocar(s.giro_final, 0.0)
+        self.control.fijar_escala(0.0)
+        self.reloj.congelar(t, False)
         self.suave.reiniciar()
         self.selector.reiniciar()
 
@@ -589,7 +630,7 @@ class Aplicacion:
     def _ejecutar_voz(self, accion, arg, t):
         """Hace lo que pidio la voz. Devuelve un aviso para la pantalla o None."""
         c = self.comparador
-        if self.viaje is not None and accion not in ("voz", "ayuda", "tiempo", "control", "camara", "girar", "zoom"):
+        if self.ocupado and accion not in ("voz", "ayuda", "tiempo", "control", "camara", "girar", "zoom"):
             return "Viajando… espera a llegar"
         if accion == "voz":
             self.voz_activa = bool(arg)
@@ -697,7 +738,7 @@ class Aplicacion:
         elif k == ord("r"):
             with self.control.lock:
                 self.control.reiniciar()
-            self.foco, self.viaje, self.modo = "tierra", None, "astro"
+            self.foco, self.viaje, self.modo, self.salida = "tierra", None, "astro", None
             self.comparador.cerrar()
             self.quiz.cerrar()
             self.reloj.congelar(t, False)

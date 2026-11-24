@@ -7,13 +7,18 @@ Solo depende de numpy. No sabe nada de ventanas: render.py lo dibuja y main.py l
     Viaje:    no es un teletransporte. 1) la camara gira hacia el destino, 2) salta al
               hiperespacio (las estrellas se estiran en rayas), 3) sale cerca del astro
               a la misma escala con la que lo dejaste.
+    Salida:   del astro a la vista del Sistema Solar alejandose rapido (jalar el zoom bajo el
+              tope); el cambio de vista queda oculto a medio vuelo.
 """
 
+import copy
 import math
 
 import numpy as np
 
+from universo import astros as A
 from universo import config as C
+from universo import sistema as S
 
 
 def _suave(x):
@@ -116,3 +121,119 @@ class Viaje:
         hiper = math.sin(math.pi * min(max((u - g * 0.6) / (1.0 - g * 0.6), 0.0), 1.0)) ** 0.7
         arriba = self.arriba0 * (1.0 - avance) + self.arriba1 * avance
         return pos, objetivo, hiper, arriba / np.linalg.norm(arriba)
+
+
+# ----------------------------------------------------------------------
+# Salida al Sistema Solar (jalar el zoom bajo el tope): un vuelo hacia afuera sin corte aparente
+# ----------------------------------------------------------------------
+def matriz_sistema(giro, inclinacion):
+    """Ejes de la vista del Sistema Solar (filas: derecha, abajo, hacia ti) en el marco ecliptico,
+    e inclinacion real de la vista (rad). La usan vista_sistema.py y la Salida."""
+    tilt = float(np.clip(math.radians(C.SISTEMA_INCLINACION) + inclinacion, -1.50, 1.50))
+    ct, st = math.cos(tilt), math.sin(tilt)
+    M0 = np.array([[1.0, 0.0, 0.0], [0.0, -ct, -st], [0.0, -st, ct]])
+    return M0 @ A.rot_z(giro), tilt
+
+
+def interpolar_ejes(M0, M1, w):
+    """Ejes que van de M0 (w = 0) a M1 (w = 1) girando por el camino mas corto."""
+    R = M1 @ M0.T
+    ang = math.acos(min(max((np.trace(R) - 1.0) / 2.0, -1.0), 1.0))
+    if ang < 1e-9:
+        return (M1 if w >= 1.0 else M0).copy()
+    if math.pi - ang < 1e-6:                              # media vuelta: el eje sale de R + I
+        B = R + np.eye(3)
+        k = B[:, int(np.argmax(np.linalg.norm(B, axis=0)))]
+    else:
+        k = np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]])
+    k = k / np.linalg.norm(k)
+    K = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
+    a = ang * min(max(w, 0.0), 1.0)
+    return (np.eye(3) + math.sin(a) * K + (1.0 - math.cos(a)) * (K @ K)) @ M0
+
+
+def heliocentrica_astro(nombre, jd, centro_tierra=None):
+    """Posicion de un astro en el marco ecliptico heliocentrico (UA), como lo pone la vista del
+    sistema. La Luna se calcula desde su centro en el marco de la Tierra (centro_tierra, en RT)."""
+    if nombre == "sol":
+        return np.zeros(3)
+    if nombre == "luna":
+        E = S.ecliptica_a_tierra(jd)
+        return S.heliocentrica("tierra", jd) + E.T @ np.asarray(centro_tierra, float) / S.UA_RT
+    return S.heliocentrica(nombre, jd)
+
+
+class Salida:
+    """Del astro en foco a la vista del Sistema Solar, alejandose rapido y sin corte aparente.
+
+    1) Vista del astro (perspectiva): la camara retrocede en linea recta, cada vez mas rapido,
+       con los mismos ejes; el astro se encoge hasta ser un punto.
+    2) Cuando mide SALIDA_RADIO_CORTE px se pasa a la vista del sistema (ortografica) con el MISMO
+       encuadre: centrada en el astro, mismos ejes (las estrellas no se mueven) y la escala que
+       corresponde a esa distancia. Sigue alejandose a la misma velocidad mientras gira a la
+       inclinacion de siempre (por el camino mas corto: queda del lado desde el que mirabas) y el
+       centro pasa del astro al Sol.
+    La distancia avanza en escala logaritmica con una sola curva suave: no hay salto de velocidad.
+
+    cam: la camara al salir (marco de la Tierra); centro, radio: del astro (RT, marco de la Tierra);
+    helio: el astro en la vista del sistema (UA); E: ecliptica -> Tierra; px_ua_final: escala final."""
+
+    def __init__(self, t0, cam, centro, radio, helio, E, px_ua_final):
+        self.t0 = t0
+        self.dur = max(C.SALIDA_DURACION, 1e-3)
+        self.cam0 = cam
+        self.centro = np.asarray(centro, float)
+        self.atras = cam.M[2].copy()
+        self.f = cam.f
+        d0 = max(float(np.linalg.norm(cam.pos - self.centro)), radio * 1.01)
+        d_corte = radio * A.distancia_para_radio(C.SALIDA_RADIO_CORTE, self.f)
+        self.L0 = math.log(d0)
+        self.Lc = math.log(max(d_corte, d0 * 1.2))
+        self.Le = max(math.log(self.f * S.UA_RT / px_ua_final), self.Lc + 1.0)
+        self.px_ua_final = px_ua_final
+        self.px_ua_corte = self.f * S.UA_RT / math.exp(self.Lc)
+        lo, hi, meta = 0.0, 1.0, (self.Lc - self.L0) / (self.Le - self.L0)
+        for _ in range(40):                               # fraccion del vuelo en la que se cambia de vista
+            mid = 0.5 * (lo + hi)
+            lo, hi = (mid, hi) if _suave(mid) < meta else (lo, mid)
+        self.u_corte = hi
+        self.helio = np.asarray(helio, float)
+        self.M_ecl = cam.M @ E                            # ejes de la camara en el marco ecliptico
+        # giro final: el de la vista del sistema mas parecida a la camara (traza maxima de M_t(g) Mc^T)
+        N = self.M_ecl.T @ matriz_sistema(0.0, 0.0)[0]
+        self.giro_final = math.atan2(N[0, 1] - N[1, 0], N[0, 0] + N[1, 1])
+        self.M_final = matriz_sistema(self.giro_final, 0.0)[0]
+
+    def fase(self, t):
+        return min(max((t - self.t0) / self.dur, 0.0), 1.0)
+
+    def terminado(self, t):
+        return t - self.t0 >= self.dur
+
+    def _log_dist(self, t):
+        return self.L0 + (self.Le - self.L0) * _suave(self.fase(t))
+
+    def estado(self, t):
+        """{"modo": "astro", "camara"} en la primera parte; {"modo": "sistema", "M", "centro",
+        "px_ua", "progreso", "dist_ua", "perspectiva", "aparicion"} despues del corte.
+        "perspectiva" (1 -> 0): en el corte la vista del sistema proyecta igual que la camara (lo lejano
+        no salta) y se vuelve ortografica, como la vista normal, al terminar. "aparicion" (0 -> 1 en
+        SALIDA_FUNDIDO s): las orbitas se encienden y el Sol pasa de su sprite al icono."""
+        L = self._log_dist(t)
+        if L < self.Lc:
+            cam = copy.copy(self.cam0)
+            cam.distancia = math.exp(L)
+            cam.pos = self.centro + self.atras * cam.distancia
+            return {"modo": "astro", "camara": cam}
+        q = (L - self.Lc) / (self.Le - self.Lc)
+        s = self.f * S.UA_RT / math.exp(L)
+        a = C.SALIDA_PAN_EXP
+        rc = (self.px_ua_final / self.px_ua_corte) ** a
+        wp = ((self.px_ua_final / s) ** a - rc) / max(1.0 - rc, 1e-12)
+        wp = min(max(wp, 0.0), 1.0)
+        wr = _suave(q)
+        return {"modo": "sistema", "M": interpolar_ejes(self.M_ecl, self.M_final, wr),
+                "centro": self.helio * (1.0 - wp), "px_ua": s, "progreso": wr,
+                "dist_ua": math.exp(L) / S.UA_RT, "perspectiva": 1.0 - wr,
+                "aparicion": min(max((self.fase(t) - self.u_corte) * self.dur / max(C.SALIDA_FUNDIDO, 1e-3),
+                                     0.0), 1.0)}

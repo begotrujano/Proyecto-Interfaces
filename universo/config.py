@@ -234,6 +234,20 @@ EDAD_MINIMA_MANO = 0.20        # s; ignora movimientos de una mano recien aparec
 # Zoom (mano izquierda): puno + subir/bajar
 GANANCIA_ZOOM = 2.5            # subir media pantalla = x3.5
 ESCALA_MIN, ESCALA_MAX = 0.08, 6.0
+# Salir a la vista del Sistema Solar: en un astro, con el zoom ya en el tope (ESCALA_MIN), seguir
+# bajando el puno izquierdo. Primero hay que "jalar" SALIDA_EXCESO (en log de zoom; 0.15 = ~6 % de
+# pantalla con GANANCIA_ZOOM 2.5) y luego mantener la mano abajo SALIDA_SOSTENER s mientras se llena
+# el anillo del cursor. Subir el puno mas de SALIDA_TOLERANCIA (log) o abrir la mano lo cancela.
+SALIDA_SISTEMA = True
+SALIDA_EXCESO = 0.15
+SALIDA_SOSTENER = 0.9
+SALIDA_TOLERANCIA = 0.06
+# El vuelo hacia afuera (viaje.Salida): la camara se aleja del astro cada vez mas rapido y, cuando
+# ya es un punto, pasa sin que se note a la vista del sistema, que sigue alejandose y se centra en el Sol
+SALIDA_DURACION = 2.2          # s de todo el vuelo
+SALIDA_RADIO_CORTE = 2.0       # px que mide el astro cuando se cambia de vista
+SALIDA_FUNDIDO = 0.35          # s en que, tras el cambio, se encienden las orbitas y el Sol pasa a su icono
+SALIDA_PAN_EXP = 1.5           # > 1: el centro pasa al Sol ya de lejos (el astro no se sale de la pantalla)
 
 # Giro (mano derecha)
 #   puno = agarrar la Tierra (la superficie sigue a tu mano, en 2D); al soltar conserva el impulso
