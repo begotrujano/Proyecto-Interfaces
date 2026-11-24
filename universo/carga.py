@@ -30,6 +30,7 @@ class AstroBajoDemanda:
         self.chico = None
         self.grande = None
         self.pedido = False                               # se pidio la grande (cargando o lista)
+        self.quiere_planas = False                        # el comparador pidio las texturas sin luz (luz_vista)
         self.uso = 0.0                                    # ultima vez que se dibujo la grande (para liberar)
         self._sol = None                                  # ultima direccion del Sol (para hornear al cargar)
         self._lock = threading.Lock()
@@ -64,6 +65,8 @@ class AstroBajoDemanda:
                    respaldo=lambda: self.generar(a), **self.kw)
         if self._sol is not None:
             t.iluminar(self._sol, esperar=True)
+        if self.quiere_planas:
+            t.preparar_planas(esperar=True)
         self.chico = t
 
     def preparar(self, esperar=False):
@@ -86,9 +89,29 @@ class AstroBajoDemanda:
         t = Tierra(self.ruta, respaldo=lambda: self.generar(self.ancho_respaldo), **self.kw)
         if self._sol is not None:
             t.iluminar(self._sol, esperar=True)           # la luz se hornea aqui, no en el dibujo
+        if self.quiere_planas:
+            t.preparar_planas(esperar=True)               # (lo mismo para la luz de vista del comparador)
         with self._lock:
             if self.pedido and gen == self._generacion:
                 self.grande = t
+
+    def preparar_planas(self):
+        """El comparador pide las texturas sin luz (luz_vista) de la version chica y la grande."""
+        self.quiere_planas = True
+        for t in (self.chico, self.grande):
+            if t is not None:
+                t.preparar_planas()
+
+    def soltar_planas(self):
+        self.quiere_planas = False
+        for t in (self.chico, self.grande):
+            if t is not None:
+                t.soltar_planas()
+
+    def listo_comparar(self):
+        """La version grande y sus texturas sin luz estan listas (el comparador no dibuja antes)."""
+        g = self.grande
+        return g is not None and g.listo_comparar()
 
     def liberar(self):
         """Suelta la version grande (la chica se queda)."""
@@ -107,7 +130,7 @@ class AstroBajoDemanda:
                 t.iluminar(self._sol, esperar)
 
     def dibujar(self, buf, cx, cy, radio, giro, inclinacion=0.0, sol=(-0.62, -0.38, 0.69), sol_tierra=None,
-                rodar=0.0):
+                rodar=0.0, luz_vista=False):
         if sol_tierra is not None:
             self._sol = np.asarray(sol_tierra, np.float64)
         grande = self.grande
@@ -122,4 +145,4 @@ class AstroBajoDemanda:
             cv2.circle(buf, (int(round(cx * 16)), int(round(cy * 16))), int(max(radio, 1.0) * 16),
                        tuple(int(c * 0.6) for c in self.color), -1, cv2.LINE_AA, 4)
             return
-        t.dibujar(buf, cx, cy, radio, giro, inclinacion, sol, sol_tierra, rodar)
+        t.dibujar(buf, cx, cy, radio, giro, inclinacion, sol, sol_tierra, rodar, luz_vista)

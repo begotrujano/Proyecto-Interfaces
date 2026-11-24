@@ -329,8 +329,9 @@ class Aplicacion:
         self.escena.resaltado = (self.escena.astros["objetivos"][bajo] + (bajo,)) if bajo else None
         objetivos = self.escena.astros.get("objetivos", {})
         self.comparador.actualizar(est, objetivos, self.modo, t)
-        self.gravedad.actualizar(est, self.foco, dt, t, self._dim[0], self._dim[1])
-        self.corte.actualizar(est, self.modo, self.viaje)
+        if not self.comparador.activo:                    # con el comparador abierto, estos modos no escuchan
+            self.gravedad.actualizar(est, self.foco, dt, t, self._dim[0], self._dim[1])
+            self.corte.actualizar(est, self.modo, self.viaje)
         self.quiz.actualizar(est, objetivos, self._dim[0], self._dim[1], t)
         accion_menu = self.menu.actualizar(
             est, self.modo, self.comparador, self.gravedad, self.corte, self.quiz,
@@ -507,6 +508,8 @@ class Aplicacion:
             self.alternar_sistema(t)
         elif accion == "comparar":
             self.quiz.cerrar()
+            self.gravedad.activo = False                  # el comparador va solo: nada encima ni debajo
+            self.corte.manual = False
             self.comparador.alternar_demo(self.foco)
             if self.comparador.activo:
                 self.comparador._t_inicio = t
@@ -514,12 +517,14 @@ class Aplicacion:
             self.comparador.siguiente_par()
             self.comparador._t_inicio = t
         elif accion == "gravedad":
+            self.comparador.cerrar()
             self.gravedad.alternar(self._dim[0], self._dim[1], t)
         elif accion == "peso_mas":
             self.gravedad.cambiar_peso(5.0)
         elif accion == "peso_menos":
             self.gravedad.cambiar_peso(-5.0)
         elif accion == "corte":
+            self.comparador.cerrar()
             self.corte.alternar_manual()
         elif accion == "quiz":
             self.comparador.cerrar()

@@ -244,21 +244,23 @@ class Escena:
             self._espacio(log_escala, giro, inclinacion, fecha or fecha_actual(), foco, viaje, t)
         if seleccion is not None:
             self._seleccion(seleccion)
-        if self.resaltado is not None and modo == self._modo:
+        modos = info.get("modos")
+        comparando = bool(modos and modos[2].activo)       # el comparador usa toda la pantalla: lo demas se aparta
+        if self.resaltado is not None and modo == self._modo and not comparando:
             x, y, r, nombre = self.resaltado
             cv2.circle(self.buf, _p(x, y), int((max(r, 12.0) + 8) * 16), (255, 255, 255), 1, cv2.LINE_AA, 4)
             accion = "volver" if (modo == "sistema" and nombre == foco) else "ir a"
             self.texto.dibujar(self.buf, f"clic: {accion} {NOMBRES.get(nombre, nombre)}" if accion == "ir a"
                                else f"clic: volver a {NOMBRES.get(nombre, nombre)}",
                                x, y + max(r, 12.0) + 16, 13, COL_TEXTO, False, "c")
-        modos = info.get("modos")
         if modos is not None:
             corte, gravedad, comparador, quiz = modos
-            corte.dibujar(self, foco)
-            gravedad.dibujar(self, foco)
+            if not comparando:
+                corte.dibujar(self, foco)
+                gravedad.dibujar(self, foco)
             comparador.dibujar(self, A.dia_juliano(fecha or fecha_actual()), t)
             quiz.dibujar(self, t)
-        if estado.activo:
+        if estado.activo and not comparando:
             self._barra_zoom(log_escala, estado.zoom_agarrado)
         menu = info.get("menu")
         if menu is not None:
@@ -266,9 +268,10 @@ class Escena:
         self._manos(estado)
         if ver_camara and frame is not None:
             self._camara(frame, estado)
-        if ficha_visible and not (modos and modos[2].activo):
+        if ficha_visible and not comparando:
             self._ficha(*ficha)
-        self._hud(log_escala, giro, inclinacion, estado, info, ver_info, modo)
+        quiz_activo = bool(modos and modos[3].activo)         # su panel va arriba: el HUD de arriba se aparta
+        self._hud(log_escala, giro, inclinacion, estado, info, ver_info, modo, comparando or quiz_activo)
         self._avisos(estado, t)
         if self._fundido is not None:
             a = 1.0 - (t - self._fundido[1]) / max(C.SISTEMA_TRANSICION, 1e-3)
@@ -562,7 +565,7 @@ class Escena:
         self.buf[y0:y0 + alto, x0:x0 + ancho] = pip
         cv2.rectangle(self.buf, (x0, y0), (x0 + ancho, y0 + alto), (90, 90, 90), 1, cv2.LINE_AA)
 
-    def _hud(self, log_escala, giro, inclinacion, estado, info, ver_info, modo="astro"):
+    def _hud(self, log_escala, giro, inclinacion, estado, info, ver_info, modo="astro", comparando=False):
         b, T = self.buf, self.texto
         if estado.activo:
             cv2.circle(b, _p(26, 31), 6 * 16, COL_OK, -1, cv2.LINE_AA, 4)
@@ -570,6 +573,8 @@ class Escena:
         else:
             cv2.circle(b, _p(26, 31), 6 * 16, COL_GRIS, -1, cv2.LINE_AA, 4)
             T.dibujar(b, "EN PAUSA", 40, 19, 18, COL_GRIS, True)
+        if comparando:                                     # el comparador pone su propio encabezado y ayuda
+            return
         lon = -math.degrees(giro)
         lon = (lon + 180.0) % 360.0 - 180.0
         lado = "O" if lon < 0 else "E"

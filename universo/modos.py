@@ -94,6 +94,11 @@ PARES_DEMO = [
     ("sol", "tierra"),
 ]
 
+for _i, _a in enumerate(["sol", "mercurio", "venus", "tierra", "luna", "marte"]):     # y el resto de combinaciones
+    for _b in ["sol", "mercurio", "venus", "tierra", "luna", "marte"][_i + 1:]:
+        if (_a, _b) not in PARES_DEMO and (_b, _a) not in PARES_DEMO:
+            PARES_DEMO.append((_a, _b))
+
 # Preguntas del Modo Quiz (todas respondibles con los 5 astros visibles en vista_sistema.py)
 PREGUNTAS_QUIZ = [
     ("¿Cuál es el planeta más caluroso del Sistema Solar?", "venus", "¡Sí! Sus nubes guardan el calor como un horno."),
@@ -137,13 +142,62 @@ def _esta_senalando(mano_vista):
 # ----------------------------------------------------------------------
 # 1. Comparador de tamaños (2 puños en vista sistema, menú o tecla C)
 # ----------------------------------------------------------------------
+# Datos extra que solo usa el comparador: rotación (horas, negativa = al revés) e inclinación del eje (grados)
+DATOS_COMP = {
+    "sol": dict(dia_h=609.1, incl=7.25),
+    "mercurio": dict(dia_h=1407.6, incl=0.03),
+    "venus": dict(dia_h=-5832.5, incl=177.36),
+    "tierra": dict(dia_h=23.93, incl=23.44),
+    "luna": dict(dia_h=655.7, incl=6.68),
+    "marte": dict(dia_h=24.62, incl=25.19),
+}
+
+
+def _ease_salida(x):
+    """Entrada con un pequeño rebote (0 → 1)."""
+    x = min(max(x, 0.0), 1.0)
+    c1 = 1.1
+    return 1.0 + (c1 + 1.0) * (x - 1.0) ** 3 + c1 * (x - 1.0) ** 2
+
+
+def _ease_cubica(x):
+    x = min(max(x, 0.0), 1.0)
+    return 1.0 - (1.0 - x) ** 3
+
+
+def _con_articulo(nombre, mayuscula=False):
+    a = S.ARTICULOS.get(nombre, "")
+    txt = f"{a} {S.NOMBRES[nombre]}".strip()
+    return txt[0].upper() + txt[1:] if mayuscula else txt
+
+
+def _miles(v, dec=0):
+    return f"{v:,.{dec}f}".replace(",", " ")
+
+
+def _duracion_dia(dia_h):
+    h = abs(dia_h)
+    txt = f"{h:.1f} horas" if h < 48 else f"{h / 24.0:.0f} días"
+    return txt + (" (al revés)" if dia_h < 0 else "")
+
+
 class ComparadorTamanos:
+    """Dos astros a escala real, girando con la luz quieta en pantalla.
+    Dinámico: entran creciendo, giran a su ritmo (comprimido), con su inclinación de eje y con los datos de cada uno;
+    con el puño derecho se arrastra para girarlos y con inercia. Se recorren los 15 pares con N / el menú."""
+
     def __init__(self):
         self.activo = False
         self.par = None                   # ("tierra", "marte")
         self.agarrados = {}               # rol ("izq"/"der") -> nombre_astro
         self._idx_demo = 0
         self._t_inicio = 0.0
+        self._par_visto = None            # par que ya se empezó a dibujar (reinicia la animación de entrada)
+        self._giros = {}                  # nombre -> giro acumulado (rad)
+        self._t_prev = None
+        self._arr_x = None                # x del puño derecho mientras arrastra
+        self._empuje = 0.0                # giro (rad) pedido por el arrastre, aún sin aplicar
+        self._vel_inercia = 0.0           # rad/s que queda al soltar
 
     def alternar_demo(self, foco="tierra"):
         if not self.activo:
@@ -161,16 +215,28 @@ class ComparadorTamanos:
     def cerrar(self):
         self.activo = False
         self.par = None
+        self._par_visto = None
+        self._t_prev = None
+        self._arr_x = None
+        self._empuje = self._vel_inercia = 0.0
         self.agarrados.clear()
+        self._liberar = True              # dibujar() suelta las texturas sin luz en el hilo de dibujo
 
     def actualizar(self, est, objetivos, modo, t=0.0):
         """En vista sistema: cierra puño sobre un planeta con cada mano y júntalas.
-        Para cerrar el comparador: abre ambas manos y sepáralas."""
+        Con el comparador abierto: puño derecho arrastrando = girar; abre ambas manos y sepáralas = cerrar."""
         if modo != "sistema" and not self.activo:
             self.agarrados.clear()
             return
         vis = [m for m in est.manos if m.visible]
         if self.activo:
+            der = next((m for m in vis if m.rol == "der" and m.puno), None)
+            if der is not None:
+                if self._arr_x is not None:
+                    self._empuje += (der.x - self._arr_x) * C.COMPARADOR_GANANCIA_GIRO
+                self._arr_x = der.x
+            else:
+                self._arr_x = None
             abiertas = [m for m in vis if not m.puno and not m.ok]
             if len(abiertas) == 2 and (t - self._t_inicio) > 1.0:
                 dist = abs(float(abiertas[0].norm[9, 0] - abiertas[1].norm[9, 0]))
@@ -201,67 +267,170 @@ class ComparadorTamanos:
                         self._t_inicio = t
                         self.agarrados.clear()
 
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _dibujantes(escena, par):
+        return {n: getattr(escena, n, None) for n in par}
+
+    def _pedir(self, dibs):
+        """Pide la textura grande y las texturas sin luz de cada astro (en otros hilos)."""
+        for d in dibs.values():
+            if d is None:
+                continue
+            if hasattr(d, "preparar"):
+                d.preparar()
+            d.preparar_planas()
+
+    @staticmethod
+    def _listos(dibs):
+        return all(d is not None and d.listo_comparar() for d in dibs.values())
+
+    def _avanzar_giros(self, par, t):
+        """Giro de cada astro: auto (a su ritmo) o arrastrado con el puño, con inercia al soltar."""
+        dt = 0.0 if self._t_prev is None else min(max(t - self._t_prev, 0.0), 0.1)
+        self._t_prev = t
+        arrastrando = self._arr_x is not None
+        empuje, self._empuje = self._empuje, 0.0
+        if arrastrando and dt > 1e-4:
+            self._vel_inercia = 0.5 * self._vel_inercia + 0.5 * empuje / dt
+        elif not arrastrando:
+            self._vel_inercia *= math.exp(-dt / max(C.COMPARADOR_INERCIA_S, 1e-3))
+        for n in par:
+            dia_h = DATOS_COMP[n]["dia_h"]
+            dias = max(abs(dia_h) / 24.0, 1.0)
+            vuelta = C.COMPARADOR_VUELTA_S * dias ** C.COMPARADOR_COMPRESION        # s por vuelta en pantalla
+            auto = 0.0 if arrastrando else math.copysign(2 * math.pi / vuelta, dia_h)
+            if n not in self._giros:
+                self._giros[n] = math.radians(99.0) if n == "tierra" else 0.0     # la Tierra arranca en México
+            self._giros[n] += (auto + self._vel_inercia) * dt + empuje
+
+    def _dibujar_astro(self, escena, dib, nombre, x, y, r):
+        d = DATOS_COMP[nombre]
+        incl = min(d["incl"], 180.0 - d["incl"])                # Venus: 177° = 3° vista desde arriba (gira al revés)
+        rodar = math.radians(incl)                              # el polo norte se inclina hacia la derecha
+        giro = self._giros[nombre]
+        luz = np.array(self._luz_astro.get(nombre, C.COMPARADOR_LUZ), np.float64)
+        luz /= np.linalg.norm(luz)
+        if nombre == "sol":
+            dib.dibujar(escena.buf, x, y, r, giro, C.COMPARADOR_INCLINACION, luz, np.array([1.0, 0.0, 0.0]), rodar)
+        else:
+            dib.dibujar(escena.buf, x, y, r, giro, C.COMPARADOR_INCLINACION, luz, None, rodar, luz_vista=True)
+
     def dibujar(self, escena, jd, t):
+        if getattr(self, "_liberar", False):                    # se cerró: soltar la memoria de las texturas sin luz
+            self._liberar = False
+            for n in ("tierra", "luna", "sol", "mercurio", "venus", "marte"):
+                d = getattr(escena, n, None)
+                if d is not None and hasattr(d, "soltar_planas"):
+                    d.soltar_planas()
         if not self.activo or not self.par:
             return
         buf, T = escena.buf, escena.texto
         w, h = escena.w, escena.h
         a, b = self.par
-        cuerpos = escena._cuerpos(jd)
+        dibs = self._dibujantes(escena, self.par)
+        if self._par_visto != self.par:                          # par nuevo: pedir recursos y reiniciar la entrada
+            self._par_visto = self.par
+            self._pedir(dibs)
+        if not self._listos(dibs):                               # sin textura grande se vería borroso y saltaría
+            self._t_inicio = t
+            self._t_prev = t
+            cv2.addWeighted(buf, 0.18, np.full_like(buf, (14, 10, 8)), 0.82, 0, dst=buf)
+            T.dibujar(buf, "Preparando los astros…", w * 0.5, h * 0.5, 20, COL_TENUE, False, "c")
+            return
+        self._avanzar_giros(self.par, t)
 
-        # Fondo espacial oscuro para que destaquen los dos astros
-        cv2.addWeighted(buf, 0.18, np.full_like(buf, (14, 10, 8)), 0.82, 0, dst=buf)
+        anim = (t - self._t_inicio) / max(C.COMPARADOR_ENTRADA, 1e-3)
+        crece = max(_ease_salida(anim), 0.02)
+        fondo = 0.985 * _ease_cubica(anim * 2.0)                  # el fondo se oscurece mientras entran
+        cv2.addWeighted(buf, 1.0 - fondo, np.full_like(buf, (14, 10, 8)), fondo, 0, dst=buf)
 
         ra, rb = DATOS_EDU[a]["radio_km"], DATOS_EDU[b]["radio_km"]
         mayor, menor = max(ra, rb), min(ra, rb)
         ratio = mayor / menor
-
-        max_r = min(w * 0.20, h * 0.29)
-        escala = max_r / mayor
-        px_a, px_b = ra * escala, rb * escala
-
-        # Caso especial Sol vs planeta: agrandar para que el planeta sea visible y el Sol sea colosal
         es_sol = "sol" in (a, b)
-        if es_sol:
-            min_vis = 14.0
-            if min(px_a, px_b) < min_vis:
-                factor = min_vis / max(min(px_a, px_b), 0.1)
-                px_a, px_b = px_a * factor, px_b * factor
-
-        cy = h * 0.52
-        giro = t * 0.25
-        sol_dir = (-0.55, -0.35, 0.75)
+        # espacio vertical: bajo el encabezado (arriba) y sobre la fila de botones del menu (abajo, ver MenuGestos)
+        y_top = C.COMPARADOR_Y_ARRIBA
+        r_tope = max((h - C.COMPARADOR_Y_RESERVA) / 2.0, 40.0)
+        self._luz_astro = {}
 
         if es_sol:
-            grande, chico = (a, b) if a == "sol" else (b, a)
-            rg, rc = (px_a, px_b) if a == "sol" else (px_b, px_a)
-            xg = w * 0.36 - rg
-            xc = w * 0.62
-            cuerpos[grande][2].dibujar(buf, xg, cy, rg, giro * 0.4, 0.0, sol_dir, np.array([1.0, 0.0, 0.0]), 0.0)
-            cuerpos[chico][2].dibujar(buf, xc, cy, rc, giro, 0.0, sol_dir, np.array(sol_dir), 0.0)
-            T.dibujar(buf, S.NOMBRES[grande], w * 0.18, cy + 160, 22, COL_ACENTO, True, "c")
-            T.dibujar(buf, S.NOMBRES[chico], xc, cy + rc + 18, 20, COL_TEXTO, True, "c")
+            # el Sol es colosal: a la izquierda; el planeta (a escala real, ampliado si no se vería) a la derecha
+            grande = "sol"
+            chico = b if a == "sol" else a
+            rg = min(w * 0.22, h * 0.30, r_tope)
+            cy = y_top + rg
+            rc_real = rg * DATOS_EDU[chico]["radio_km"] / A.RADIO_SOL_KM
+            ampliacion = max(C.COMPARADOR_MIN_PX_SOL / max(rc_real, 1e-6), 1.0)
+            rc = rc_real * ampliacion
+            xg, xc = w * 0.27, w * 0.72
+            self._luz_astro[chico] = (-0.90, -0.05, 0.45)        # el Sol queda a su izquierda
+            xs = {grande: xg, chico: xc}
+            rs = {grande: rg * crece, chico: rc * crece}
+            r_max = rg
         else:
-            sep = px_a + px_b + 70.0
-            xa = w * 0.5 - sep * 0.5 + px_a
-            xb = w * 0.5 + sep * 0.5 - px_b
-            cuerpos[a][2].dibujar(buf, xa, cy, px_a, giro, 0.0, sol_dir, np.array(sol_dir), 0.0)
-            cuerpos[b][2].dibujar(buf, xb, cy, px_b, giro, 0.0, sol_dir, np.array(sol_dir), 0.0)
-            T.dibujar(buf, S.NOMBRES[a], xa, cy + px_a + 18, 20, COL_TEXTO, True, "c")
-            T.dibujar(buf, f"Diámetro: {ra * 2:,.0f} km".replace(",", " "), xa, cy + px_a + 46, 14, COL_TENUE, False, "c")
-            T.dibujar(buf, S.NOMBRES[b], xb, cy + px_b + 18, 20, COL_TEXTO, True, "c")
-            T.dibujar(buf, f"Diámetro: {rb * 2:,.0f} km".replace(",", " "), xb, cy + px_b + 46, 14, COL_TENUE, False, "c")
+            r_max = min(w * 0.20, h * 0.26, r_tope)
+            cy = y_top + r_max
+            ra_px, rb_px = r_max * ra / mayor, r_max * rb / mayor
+            hueco = max(w * 0.07, 50.0)
+            dist = ra_px + rb_px + hueco                          # entre CENTROS: radios + hueco entre bordes
+            xa, xb = w * 0.5 - dist * 0.5, w * 0.5 + dist * 0.5
+            xs = {a: xa, b: xb}
+            rs = {a: ra_px * crece, b: rb_px * crece}
+            ampliacion = 1.0
 
-        # Encabezado amigable para niños
-        _panel(buf, w * 0.5 - 320, 18, w * 0.5 + 320, 96, COL_CIAN)
-        nom_may = S.NOMBRES[a if ra >= rb else b]
-        nom_men = S.NOMBRES[b if ra >= rb else a]
-        T.dibujar(buf, f"COMPARADOR A ESCALA REAL: {S.NOMBRES[a]} vs {S.NOMBRES[b]}",
-                  w * 0.5, 28, 19, COL_CIAN, True, "c")
-        T.dibujar(buf, f"¡{nom_may} es {ratio:.1f} veces más grande que {nom_men}!",
-                  w * 0.5, 60, 16, COL_TEXTO, False, "c")
-        T.dibujar(buf, "Separa ambas manos abiertas para cerrar  ·  O usa los botones / teclas C y N",
-                  w * 0.5, h - 38, 14, COL_TENUE, False, "c")
+        # de más grande a más chico: el chico nunca queda tapado por el resplandor del grande
+        for n in sorted((a, b), key=lambda n: -rs[n]):
+            self._dibujar_astro(escena, dibs[n], n, xs[n], cy, rs[n])
+
+        # --- rótulos: aparecen cuando los astros ya casi llegaron
+        op = min(max((anim - 0.55) / 0.45, 0.0), 1.0)
+        y_nom = cy + r_max + 44.0
+        for n in (a, b):
+            r_real = rs[n] / max(crece, 1e-6)
+            yl = cy + r_real + 14.0                               # línea de medida: diámetro
+            if op > 0.0 and r_real > 3.0:
+                x0, x1 = xs[n] - r_real, xs[n] + r_real
+                col = tuple(int(c * (0.35 + 0.65 * op)) for c in COL_TENUE)
+                cv2.line(buf, (int(x0), int(yl)), (int(x1), int(yl)), col, 1, cv2.LINE_AA)
+                for xx in (x0, x1):
+                    cv2.line(buf, (int(xx), int(yl - 5)), (int(xx), int(yl + 5)), col, 1, cv2.LINE_AA)
+            if op > 0.0:
+                T.dibujar(buf, f"{_miles(DATOS_EDU[n]['radio_km'] * 2)} km", xs[n], yl + 8, 13, COL_TENUE, False, "c",
+                          opacidad=op)
+                T.dibujar(buf, S.NOMBRES[n], xs[n], y_nom, 21, COL_TEXTO, True, "c", opacidad=op)
+                g = DATOS_EDU[n]["gravedad"]
+                T.dibujar(buf, f"Gravedad: {g:.1f} m/s²", xs[n], y_nom + 30, 14, COL_TENUE, False, "c", opacidad=op)
+                T.dibujar(buf, f"Un día: {_duracion_dia(DATOS_COMP[n]['dia_h'])}", xs[n], y_nom + 50, 14, COL_TENUE,
+                          False, "c", opacidad=op)
+        if es_sol and op > 0.0:
+            if ampliacion > 1.5:
+                rv = max(rc_real, 0.6)
+                xr = xc + rc + 70.0
+                cv2.circle(buf, (int(xr), int(cy)), max(int(round(rv)), 1), COL_TEXTO, -1, cv2.LINE_AA)
+                T.dibujar(buf, f"tamaño real", xr, cy + 16, 13, COL_TENUE, False, "c", opacidad=op)
+                T.dibujar(buf, f"Aquí se ve ×{ampliacion:.0f} más grande que en realidad", xc, cy - rc - 30,
+                          13, COL_ACENTO, False, "c", opacidad=op)
+
+        # --- encabezado, con la razón contando hacia arriba
+        valor = 1.0 + (ratio - 1.0) * _ease_cubica((t - self._t_inicio) / 1.4)
+        vol = ratio ** 3
+        mitad = min(340.0, w * 0.5 - 270.0)                      # sin tapar el estado (izq.) ni la camara (der.)
+        _panel(buf, w * 0.5 - mitad, 18, w * 0.5 + mitad, 108, COL_CIAN)
+        T.dibujar(buf, f"COMPARADOR A ESCALA REAL: {S.NOMBRES[a]} vs {S.NOMBRES[b]}", w * 0.5, 28, 19, COL_CIAN, True, "c")
+        nom_may = a if ra >= rb else b
+        nom_men = b if ra >= rb else a
+        if ratio < 1.15:
+            frase = f"¡{S.NOMBRES[a]} y {S.NOMBRES[b]} casi miden lo mismo! (×{valor:.2f})"
+        else:
+            frase = f"¡{_con_articulo(nom_may, True)} es {valor:.1f} veces más grande que {_con_articulo(nom_men)}!"
+        T.dibujar(buf, frase, w * 0.5, 60, 17, COL_TEXTO, False, "c")
+        vol_v = valor ** 3                                       # el volumen sube junto con la razón
+        T.dibujar(buf, f"{_con_articulo(nom_may, True)} tiene ≈ {_miles(vol_v, 0 if vol >= 10 else 1)} veces "
+                       f"el volumen de {_con_articulo(nom_men)}",
+                  w * 0.5, 84, 13, COL_TENUE, False, "c")
+        T.dibujar(buf, "Puño derecho: arrastra para girarlos  ·  Separa ambas manos abiertas para cerrar  ·  Teclas C y N",
+                  w * 0.5, h - 26, 14, COL_TENUE, False, "c")
 
 
 # ----------------------------------------------------------------------
@@ -519,7 +688,8 @@ class ModoQuiz:
         buf, T = escena.buf, escena.texto
         w = escena.w
 
-        _panel(buf, w * 0.5 - 390, 14, w * 0.5 + 390, 96, COL_OK)
+        mitad = min(390.0, w * 0.5 - 270.0)                      # sin tapar el estado (izq.) ni la camara (der.)
+        _panel(buf, w * 0.5 - mitad, 14, w * 0.5 + mitad, 96, COL_OK)
         if t < self.feedback_hasta:
             col = COL_OK if self.es_correcta else COL_ERR
             T.dibujar(buf, self.feedback, w * 0.5, 42, 19, col, True, "c")

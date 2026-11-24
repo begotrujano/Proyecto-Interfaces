@@ -290,6 +290,38 @@ class Tierra:
         self._ultimo_sincrono = -1e9
         self._paso_anterior = 0.0
 
+        # luz de vista (comparador): texturas SIN luz horneada; el dia y la noche se calculan por cuadro
+        # con el Sol en el marco de la camara, asi el terminador no gira junto con el planeta
+        self._planas = None                               # piramide BGRA (albedo + mascara del mar)
+        self._planas_noche = None
+        self._hilo_planas = None
+        self._luts_planas = None
+
+    # ------------------------------------------------------------------
+    def preparar_planas(self, esperar=False):
+        """Construye (en otro hilo) las texturas sin luz que usa dibujar(luz_vista=True)."""
+        if self._planas is not None or self.emisivo:
+            return
+        with self._lock_primera:
+            if self._hilo_planas is None:
+                def trabajo():
+                    if self._noche is not None:
+                        self._planas_noche = _piramide(self._noche)
+                    self._luts_planas = _luts_luz(0.0, self.atmosfera)
+                    self._planas = _piramide(np.dstack([self._dia, self._mar]))   # al final: marca "lista"
+                self._hilo_planas = threading.Thread(target=trabajo, daemon=True, name="texturas_planas")
+                self._hilo_planas.start()
+        if esperar:
+            self._hilo_planas.join()
+
+    def soltar_planas(self):
+        """Libera las texturas sin luz (ocupan memoria): se vuelven a crear si se piden otra vez."""
+        with self._lock_primera:
+            self._planas = self._planas_noche = self._hilo_planas = None
+
+    def listo_comparar(self):
+        return self.emisivo or self._planas is not None
+
     # ------------------------------------------------------------------
     def iluminar(self, sol_tierra, esperar=False):
         """Pide hornear la luz para esta posicion del Sol (marco de la Tierra). Solo trabaja si
@@ -337,14 +369,23 @@ class Tierra:
             self._hilo.start()
 
     def dibujar(self, buf, cx, cy, radio, giro, inclinacion=0.0, sol=(-0.62, -0.38, 0.69), sol_tierra=None,
-                rodar=0.0):
+                rodar=0.0, luz_vista=False):
         """Compone la Tierra sobre buf (BGR uint8) centrada en (cx, cy).
         giro en radianes: positivo = la superficie de enfrente se mueve a la derecha.
         inclinacion en radianes: positivo = la superficie de enfrente sube (se ve el sur).
         rodar en radianes: cuanto esta girada la camara sobre su eje de vista (0 = norte arriba).
         sol: direccion hacia el Sol en el marco de la camara (x derecha, y abajo, z hacia ti).
-        sol_tierra: la misma direccion en el marco de la Tierra (para hornear el dia y la noche)."""
-        if sol_tierra is not None:
+        sol_tierra: la misma direccion en el marco de la Tierra (para hornear el dia y la noche).
+        luz_vista: el dia y la noche se calculan por cuadro con `sol` (marco de la camara) en vez de usar la luz
+        horneada: la luz queda quieta en pantalla aunque el astro gire (comparador). Mientras las texturas
+        sin luz no esten listas se dibuja con la luz horneada."""
+        planas = self._planas if (luz_vista and not self.emisivo) else None
+        if luz_vista and not self.emisivo and planas is None:
+            self.preparar_planas()
+        plana = planas is not None
+        if plana:
+            pass                                          # no hace falta hornear nada
+        elif sol_tierra is not None:
             self.iluminar(sol_tierra)
         elif self.texturas is None:
             self.iluminar(np.array([0.70, -0.42, 0.58]))  # sin Sol real: de frente, arriba a la izquierda
@@ -364,13 +405,14 @@ class Tierra:
         w, h = x1 - x0, y1 - y0
 
         # textura: ~1 texel por pixel en el ecuador
-        texturas = self.texturas
-        tex = texturas[0]
-        for cand in texturas:
+        texturas = planas if plana else self.texturas
+        nivel_tex = 0
+        for k, cand in enumerate(texturas):
             if cand.shape[1] >= 2 * math.pi * radio:
-                tex = cand
+                nivel_tex = k
             else:
                 break
+        tex = texturas[nivel_tex]
         Ht, Wt = tex.shape[:2]
 
         # lon/lat de cada pixel: solo se recalcula si cambia la inclinacion (~1/4 de pixel)
@@ -408,8 +450,21 @@ class Tierra:
         hm, wm = mitad.shape[:2]
         nd8 = cv2.convertScaleAbs(cv2.transform(mitad, m_nd))
         nh8 = cv2.convertScaleAbs(cv2.max(cv2.transform(mitad, m_nh), 0.0))   # solo la parte positiva
+        if plana:                                         # dia/noche de este cuadro (media resolucion, luego se escala)
+            lut_dia, lut_noche, lut_dia1, _ = self._luts_planas or _luts_luz(0.0, self.atmosfera)
+            nd3 = cv2.cvtColor(nd8, cv2.COLOR_GRAY2BGR)
+            sombra = cv2.resize(cv2.LUT(nd3, lut_dia), (w, h), interpolation=cv2.INTER_LINEAR)
+            color = cv2.multiply(color, sombra, scale=1.0 / ESCALA_MUL)
+            noche_p = self._planas_noche
+            if noche_p is not None:                       # luces de las ciudades, solo del lado oscuro
+                luces = cv2.remap(noche_p[nivel_tex], mapa_x, mapa_y, cv2.INTER_LINEAR,
+                                  borderMode=cv2.BORDER_WRAP)
+                osc = cv2.resize(cv2.LUT(nd3, lut_noche), (w, h), interpolation=cv2.INTER_LINEAR)
+                color = cv2.add(color, cv2.multiply(luces, osc, scale=C.BRILLO_LUCES / 255.0))
         atm = atm_mag if self.emisivo else cv2.multiply(atm_mag, cv2.LUT(nd8, lut_atm), scale=1.0 / 255.0)
         mar = cv2.resize(cv2.extractChannel(muestra, 3), (wm, hm), interpolation=cv2.INTER_AREA)
+        if plana:                                         # el reflejo solo donde le da el Sol
+            mar = cv2.multiply(mar, cv2.LUT(nd8, lut_dia1), scale=1.0 / 255.0)
         brillo = cv2.multiply(cv2.multiply(mar, cv2.LUT(nh8, LUT_BRILLO_MAR), scale=1.0 / 255.0),
                               a_disco, scale=1.0 / 255.0)   # el reflejo no sale del disco
         resplandor = cv2.merge([cv2.addWeighted(atm, float(self._atm[0]), brillo, 1.0, 0.0),

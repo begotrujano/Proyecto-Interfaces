@@ -68,6 +68,16 @@ CORTE_DIST_MIN = 0.16              # distancia normalizada entre manos: cerrado 
 CORTE_DIST_MAX = 0.46              # distancia normalizada entre manos: totalmente abierto (100 %)
 
 COMPARADOR_DIST_JUNTAR = 0.32      # distancia normalizada al juntar ambos puños para activar comparador
+COMPARADOR_ENTRADA = 0.9           # s que tardan los astros en crecer al abrir el comparador o cambiar de par
+COMPARADOR_VUELTA_S = 22.0         # s por vuelta de un astro que gira en ~24 h (los lentos se comprimen)
+COMPARADOR_COMPRESION = 0.35       # exponente: vuelta = VUELTA_S * (dia/24h)^esto (1 = proporcional, 0 = todos igual)
+COMPARADOR_GANANCIA_GIRO = 0.012   # rad de giro por px que arrastra el puño derecho sobre el comparador
+COMPARADOR_INERCIA_S = 0.8         # s que tarda en frenarse el giro al soltar el puño
+COMPARADOR_LUZ = (-0.62, -0.30, 0.72)   # hacia donde esta el Sol (camara: x derecha, y abajo, z hacia ti); fija en pantalla
+COMPARADOR_INCLINACION = -0.20     # rad que se inclina la camara para ver un poco el polo norte
+COMPARADOR_Y_ARRIBA = 124          # px: donde empiezan los astros (justo bajo el encabezado)
+COMPARADOR_Y_RESERVA = 412         # px de alto que NO usan los astros (encabezado + rotulos + fila de botones del menu)
+COMPARADOR_MIN_PX_SOL = 12.0       # radio minimo en pantalla de un planeta frente al Sol (se avisa que esta ampliado)
 
 QUIZ_SOSTENER = 1.2                # s señalando un astro para confirmar respuesta en Modo Quiz
 QUIZ_FEEDBACK = 2.4                # s mostrando "¡Correcto!" o la pista antes de la siguiente pregunta

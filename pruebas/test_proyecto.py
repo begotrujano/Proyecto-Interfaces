@@ -1024,6 +1024,84 @@ def test_raton_en_la_aplicacion():
     assert app.viaje is None
 
 
+def test_comparador_luz_quieta():
+    """Con luz_vista el dia y la noche NO giran con el astro: una esfera lisa se ve igual a cualquier giro
+    (con la luz horneada en la textura, el terminador giraba junto con el planeta)."""
+    import cv2
+    from universo.tierra import Tierra
+    lisa = Tierra(respaldo=lambda: np.full((512, 1024, 3), 200, np.uint8), R=200, atmosfera=False, oceanos=False)
+    lisa.preparar_planas(esperar=True)
+    sol = np.array([-0.62, -0.30, 0.72])
+    fotos = []
+    for giro in (0.0, 1.3, 4.0):
+        buf = np.zeros((300, 300, 3), np.uint8)
+        lisa.dibujar(buf, 150, 150, 120, giro, -0.2, sol, None, 0.3, luz_vista=True)
+        fotos.append(buf.astype(int))
+    assert fotos[0].max() > 100
+    for f in fotos[1:]:
+        assert np.abs(f - fotos[0]).max() <= 3, "la luz cambio al girar"
+    # y la luz si viene de donde dice `sol`: el lado del Sol es mas claro que el opuesto
+    clara, oscura = fotos[0][150, 60].sum(), fotos[0][150, 240].sum()
+    assert clara > 2 * oscura, (clara, oscura)
+    print(f"  lado del Sol {clara}, lado oscuro {oscura}; maxima diferencia al girar {np.abs(fotos[1] - fotos[0]).max()}")
+
+
+def test_comparador():
+    from types import SimpleNamespace
+    from universo import modos
+    from universo.render import Escena
+    from universo.modos import ComparadorTamanos, PARES_DEMO
+    assert len(PARES_DEMO) == 15 and len(set(map(frozenset, PARES_DEMO))) == 15     # todos los pares, sin repetir
+    esc = Escena(960, 540)
+    esc.esperar_iconos()
+    comp = ComparadorTamanos()
+    for par in PARES_DEMO[:5]:
+        comp.cerrar()
+        comp.par, comp.activo, comp._t_inicio = par, True, 0.0
+        t0 = time.time()
+        while True:                                       # espera la textura grande (carga en otro hilo)
+            esc.buf[:] = 0
+            comp.dibujar(esc, 2461000.0, 0.0)
+            if comp._listos(comp._dibujantes(esc, par)):
+                break
+            assert time.time() - t0 < 60, f"no cargo {par}"
+            time.sleep(0.05)
+        comp.dibujar(esc, 2461000.0, 0.0)                 # ya listos: primer cuadro con giros
+        g0 = dict(comp._giros)
+        for k in range(1, 41):                            # 2 s a 20 cuadros/s
+            esc.buf[:] = 0
+            comp.dibujar(esc, 2461000.0, k * 0.05)
+        assert esc.buf.max() > 150 and esc.buf[60:480, 100:860].std() > 5, par
+        assert any(comp._giros[n] != g0[n] for n in par), "no giran"
+        if "venus" in par:
+            assert comp._giros["venus"] < g0["venus"], "Venus gira al reves"
+    # arrastrar con el puño derecho gira ambos y deja inercia
+    comp.cerrar()
+    comp.par, comp.activo = ("tierra", "luna"), True
+    t0 = time.time()
+    while True:
+        comp.dibujar(esc, 2461000.0, 49.0)
+        if comp._listos(comp._dibujantes(esc, comp.par)):
+            break
+        assert time.time() - t0 < 60
+        time.sleep(0.05)
+    comp.dibujar(esc, 2461000.0, 49.9)
+    mano = lambda x: SimpleNamespace(visible=True, rol="der", puno=True, ok=False, x=x, y=100.0, norm=np.zeros((21, 3)))
+    for x in (100.0, 130.0, 160.0):
+        comp.actualizar(SimpleNamespace(manos=[mano(x)]), {}, "astro", 50.0)
+    assert comp._empuje > 0.5, comp._empuje
+    antes = dict(comp._giros)
+    comp.dibujar(esc, 2461000.0, 50.0)
+    assert comp._giros["tierra"] > antes["tierra"] + 0.5 and comp._vel_inercia > 0
+    comp.actualizar(SimpleNamespace(manos=[]), {}, "astro", 50.1)     # suelta: sigue girando y se frena
+    v0 = comp._vel_inercia
+    comp.dibujar(esc, 2461000.0, 50.5)
+    assert 0 < comp._vel_inercia < v0
+    comp.cerrar()
+    comp.dibujar(esc, 2461000.0, 51.0)                     # al cerrar se sueltan las texturas sin luz
+    assert esc.tierra._planas is None
+
+
 def test_render():
     import cv2
     from universo.control import Estado, ManoVista
