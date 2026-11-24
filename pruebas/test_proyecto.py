@@ -1158,12 +1158,13 @@ def test_vista_sistema_solar():
     from universo import astros as A
     from universo import sistema as S
     from universo.render import Escena
+    from universo.vista_sistema import distancia_vista
     esc = Escena()
     est = Control().instantanea(0.0)
     fecha = _fecha(2026, 11, 22, 0, 33)
     jd = A.dia_juliano(fecha)
     esc.esperar_iconos()
-    # desde arriba (inclinacion de la vista = 0): las distancias en pantalla son las del plano de la eclíptica
+    # desde arriba (inclinacion de la vista = 0): en pantalla, la distancia comprimida y el angulo real
     incl = -math.radians(C.SISTEMA_INCLINACION)
     for k in range(3):                                             # (los primeros cuadros preparan tablas y luz)
         img = esc.componer(0.0, 0.0, est, {}, None, False, False, float(k), incl, fecha, "tierra", None, None, "sistema")
@@ -1174,16 +1175,29 @@ def test_vista_sistema_solar():
     a = esc.astros
     assert a["modo"] == "sistema" and set(a["objetivos"]) == {"sol", "mercurio", "venus", "tierra", "marte", "jupiter", "saturno", "urano", "neptuno"}
     px_ua = a["px_ua"]
-    sx, sy, _ = a["objetivos"]["sol"]
+    sx, sy, rs = a["objetivos"]["sol"]
+    anterior, radios = 0.0, {}
     for n in ("mercurio", "venus", "tierra", "marte", "jupiter", "saturno", "urano", "neptuno"):
-        x, y, _ = a["objetivos"][n]
+        x, y, r = a["objetivos"][n]
+        radios[n] = r
         P = S.heliocentrica(n, jd)
-        print(f"  {n}: {math.hypot(x - sx, y - sy) / px_ua:.3f} UA en pantalla (real {np.hypot(P[0], P[1]):.3f})")
-        assert abs(math.hypot(x - sx, y - sy) / px_ua - np.hypot(P[0], P[1])) < 0.01
-        assert abs(math.atan2(-(y - sy), x - sx) - math.atan2(P[1], P[0])) < 0.01    # y tambien el angulo: el norte eclíptico arriba
+        d_real = float(np.linalg.norm(P))
+        d_px = math.hypot(x - sx, y - sy)
+        esperado = px_ua * float(distancia_vista(d_real)) * np.hypot(P[0], P[1]) / d_real
+        print(f"  {n}: {d_real:.2f} UA reales -> {d_px:.0f} px del Sol (radio {r:.1f} px)")
+        assert abs(d_px - esperado) < 1.0
+        assert abs(math.atan2(-(y - sy), x - sx) - math.atan2(P[1], P[0])) < 0.01    # el angulo real: el norte eclíptico arriba
+        if n in ("venus", "tierra", "marte"):                                 # los interiores ya no se amontonan
+            assert d_px - anterior > 18.0, f"{n} demasiado cerca del planeta anterior"
+        anterior = d_px
+    d_merc = math.hypot(a["objetivos"]["mercurio"][0] - sx, a["objetivos"]["mercurio"][1] - sy)
+    assert d_merc > rs + 15, "Mercurio fuera del icono del Sol"
+    # tamanos: el orden real se nota (Sol > Jupiter > Saturno > Urano > Tierra > Marte > Mercurio)
+    assert rs > radios["jupiter"] > radios["saturno"] > radios["urano"] > radios["tierra"] > radios["marte"] > radios["mercurio"]
+    assert radios["jupiter"] / radios["mercurio"] > 4.0
     # el zoom por omision encuadra la orbita del planeta activo mas lejano (Neptuno, afelio 30.3 UA)
     afelio = S.ELEMENTOS["neptuno"][0][0] * (1.0 + S.ELEMENTOS["neptuno"][1][0])
-    assert abs(px_ua * afelio - C.SISTEMA_RADIO_REL * esc.h) < 1.0
+    assert abs(px_ua * float(distancia_vista(afelio)) - C.SISTEMA_RADIO_REL * esc.h) < 1.0
     # las orbitas dibujadas pasan por los planetas: hay pixeles de color de Marte bajo su icono
     print(f"  vista del sistema: {ms:.1f} ms por cuadro")
     assert ms < 40
@@ -1318,7 +1332,9 @@ def test_salida_al_sistema():
                   for st in (sal.estado(t) for t in ts[k:]))
         print(f"  {nombre}: corte al {100 * (ts[k] - 10.0) / sal.dur:.0f} % del vuelo; el astro se aparta del centro "
               f"hasta {off:.0f} px")
-        assert off < 0.45 * h
+        st = sal.estado(10.0 + sal.dur)
+        final = float(np.hypot(*(st["M"] @ (sal.helio - st["centro"]))[:2]) * st["px_ua"])
+        assert off <= final + 0.1 * h, "el astro no se aleja mas que donde termina"
     print(f"  {vistos} astros caen en el mismo pixel en las dos vistas al cambiar")
     assert vistos >= 3
 

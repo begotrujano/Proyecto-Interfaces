@@ -38,6 +38,20 @@ def _fijo(v, f):
     return tuple(int(c * f) for c in v)
 
 
+def distancia_vista(r, m=1.0):
+    """Distancia al Sol en la vista (UA "visuales"): m = 0 real, m = 1 comprimida (R0*ln(1 + r/R0))."""
+    r0 = C.SISTEMA_DISTANCIA_R0
+    return (1.0 - m) * r + m * r0 * np.log1p(np.asarray(r, float) / r0)
+
+
+def comprimir(P, m=1.0):
+    """Posiciones (UA, marco ecliptico) -> posiciones en la vista: cada punto se acerca al Sol segun
+    distancia_vista, sin cambiar de direccion. m mezcla real (0) -> comprimida (1)."""
+    P = np.asarray(P, float)
+    r = np.linalg.norm(P, axis=-1, keepdims=True)
+    return P * np.where(r > 1e-12, distancia_vista(r, m) / np.maximum(r, 1e-12), 1.0)
+
+
 def _tramos(pts, m):
     """Pedazos de una curva cerrada donde m es True, cada uno como polilinea (un segmento se dibuja
     si sus dos puntos cumplen). None = la curva completa cumple."""
@@ -55,7 +69,7 @@ class VistaSistema:
     def __init__(self, escena):
         self.e = escena
         a_max = max(S.ELEMENTOS[n][0][0] * (1.0 + S.ELEMENTOS[n][1][0]) for n in C.PLANETAS_ACTIVOS)
-        self.px_ua_base = C.SISTEMA_RADIO_REL * escena.h / a_max     # px por UA a zoom x1
+        self.px_ua_base = C.SISTEMA_RADIO_REL * escena.h / float(distancia_vista(a_max))  # px por UA visual a zoom x1
         spr = sprite_sol(7.0, 0.16 * escena.h)
         self._glow = np.clip(spr * 150.0, 0, 255).astype(np.uint8)
 
@@ -66,7 +80,7 @@ class VistaSistema:
 
     @staticmethod
     def _radio_icono(n, rp, rs):
-        return rs if n == "sol" else rp * float(np.clip(S.radio_rt(n) ** 0.3, 0.7, 2.2))
+        return rs if n == "sol" else rp * S.radio_rt(n) ** C.SISTEMA_ICONO_EXP
 
     def dibujar(self, buf, jd, log_escala, giro, inclinacion, foco, transicion=None):
         """transicion: estado de viaje.Salida (ejes, centro y escala dados; iconos que crecen desde
@@ -84,6 +98,8 @@ class VistaSistema:
             s, M, centro = tr["px_ua"], tr["M"], np.asarray(tr["centro"], float)
             zoom = s / self.px_ua_base
             tilt = math.acos(float(np.clip(M[2, 2], -1.0, 1.0)))
+        mezcla = 1.0 if tr is None else tr["progreso"]                 # distancias: reales en el corte -> comprimidas
+        centro = comprimir(centro, mezcla)
         z_sol = float(M[2] @ centro)                                   # profundidad del centro respecto al Sol
         E = S.ecliptica_a_tierra(jd)                                   # ecliptico -> marco de la Tierra
         M_tierra = M @ E.T                                             # ejes de la vista en el marco de la Tierra
@@ -94,7 +110,7 @@ class VistaSistema:
         e.cielo.fondo(buf, cam, A.ecuatorial_a_tierra(jd))
 
         def proy(P):
-            q = (np.asarray(P, float) - centro) @ M.T
+            q = (comprimir(P, mezcla) - centro) @ M.T
             if tr is None:
                 return cx + s * q[..., 0], cy + s * q[..., 1], q[..., 2]
             # en la transicion: perspectiva desde una camara a dist_ua del centro (como la vista del astro
@@ -107,7 +123,7 @@ class VistaSistema:
         lineas = buf if ap >= 1.0 else buf.copy()                      # se dibujan en una copia y se mezclan
         nombres = [n for n in S.ORDEN if n in C.PLANETAS_ACTIVOS or C.SISTEMA_MOSTRAR_PENDIENTES]
         if ap > 0.01:
-            self._anillos(lineas, proy, s, zoom, tr is None)
+            self._anillos(lineas, proy, s, zoom, tr is None, mezcla)
             puntos = 220                                               # de muy cerca, la orbita debe pasar por el planeta:
             if tr is not None:                                         # mas puntos (mismo error que a zoom x6)
                 puntos = int(np.clip(220.0 * math.sqrt(s / 57.0), 220, 1000))
@@ -209,11 +225,12 @@ class VistaSistema:
         col = _fijo(S.COLORES[nombre], 0.75 if activo else 0.35)
         self._linea(buf, x, y, d, col, 1, 0.45)
 
-    def _anillos(self, buf, proy, s, zoom, rotulos=True):
-        """Circulos de referencia en el plano de la eclíptica: 1 UA = distancia Tierra-Sol."""
+    def _anillos(self, buf, proy, s, zoom, rotulos=True, mezcla=1.0):
+        """Circulos de referencia en el plano de la eclíptica: 1 UA = distancia Tierra-Sol (el rotulo es
+        la distancia real; el circulo va donde la vista pone esa distancia)."""
         t = np.linspace(0.0, 2 * math.pi, 120, endpoint=False)
         for ua in ANILLOS_UA:
-            if not 38.0 < s * ua < 2.2 * max(self.e.w, self.e.h):
+            if not 38.0 < s * float(distancia_vista(ua, mezcla)) < 2.2 * max(self.e.w, self.e.h):
                 continue
             P = np.stack([ua * np.cos(t), ua * np.sin(t), np.zeros_like(t)], -1)
             x, y, d = proy(P)

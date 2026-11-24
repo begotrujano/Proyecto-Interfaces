@@ -165,7 +165,7 @@ class Interfaz:
                           TEAL if voz == "escuchando" else APAGADO))
         items.append(("", "ACTIVO" if estado.activo else "PAUSA", VERDE if estado.activo else ROJO))
         if modo == "sistema":
-            items.append(("ESCALA", f"{self.e.astros.get('px_ua', 0.0):.0f} PX/UA", TEXTO))
+            items.append(("ESCALA", "NO REAL", TEXTO))            # distancias y tamanos comprimidos (vista_sistema)
         else:
             lon = (-math.degrees(giro) + 180.0) % 360.0 - 180.0
             lat = -math.degrees(inclinacion)
